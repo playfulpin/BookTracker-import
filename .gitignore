@@ -1,0 +1,47 @@
+# ==========================================
+# Credentials, Secrets, and Environment
+# ==========================================
+.env
+.env.*
+*.env
+secrets/
+credentials.txt
+*.pem
+*.key
+
+# ==========================================
+# Script Execution Outputs and Logging
+# ==========================================
+*.log
+log/
+logs/
+*.out
+*.err
+*.pid
+
+# ==========================================
+# Temporary, Cache, and Backup Files
+# ==========================================
+*.tmp
+*.temp
+tmp/
+temp/
+*.bak
+*~
+.#*
+
+# ==========================================
+# Editor and IDE Metadata
+# ==========================================
+# Vim
+.*.sw[a-p]
+.*.s[a-v][a-z]
+!_*.sw[a-p]
+.netrwhist
+
+# VS Code / IntelliJ / macOS / Windows
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
