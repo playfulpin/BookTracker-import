@@ -187,8 +187,11 @@ Credentials are read from the environment variables `BOOKTRACKER_USERNAME` and
 `BOOKTRACKER_PASSWORD`, or from a gitignored `.env` file in the project root:
 
 ```bash
-cp .env.example .env
-# edit .env and fill in BOOKTRACKER_USERNAME / BOOKTRACKER_PASSWORD
+# create .env (it is gitignored) and fill in your credentials:
+cat > .env <<'EOF'
+BOOKTRACKER_USERNAME=
+BOOKTRACKER_PASSWORD=
+EOF
 ```
 
 Key settings (all overridable via environment or `.env`):

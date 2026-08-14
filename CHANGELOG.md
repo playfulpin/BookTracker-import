@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
 - `all` command to run the five download targets in sequence.
 - Leveled logging (`log`, `log_info`, `log_warn`, `log_error`, `debug`).
 - Bash test suite (`tests/run_tests.sh`) covering the pure functions.
-- `.env.example` template and `.gitignore` rules for credentials and runtime data.
+- `.gitignore` rules to keep credentials and runtime data out of version control.
 
 ### Fixed
 
