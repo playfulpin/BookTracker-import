@@ -64,29 +64,23 @@ Contains automated tests for project functions and scripts.
 
 ## Requirements
 
-The project is intended for a Unix/Linux environment.
+The project is intended for a Unix/Linux environment (it also runs under Git
+Bash on Windows).
 
-Required utilities will be documented here as the implementation evolves.
+Required utilities:
 
-Typical dependencies may include:
-
-* Bash
+* Bash 4+
 * `curl`
-* `wget`
-* `awk`
-* `sed`
-* `grep`
-* `find`
-* `sort`
-
-Additional utilities may be required depending on the enabled functionality.
+* GNU `grep` (with `-o`/`-a`)
+* GNU `date` (with `-d`/`-u`)
+* `head`, `cut`, `du` (coreutils)
 
 ## Installation
 
 Clone the repository:
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/playfulpin/BookTracker-import.git
 cd booktracker-import
 ```
 
@@ -110,19 +104,73 @@ Display the available command-line options:
 ./bin/booktracker-import.sh --help
 ```
 
-Perform a dry run:
+Log in (stores the session cookie under `data/`):
 
 ```bash
-./bin/booktracker-import.sh --dry-run
+./bin/booktracker-import.sh login
 ```
 
-Run the import:
+Download a specific torrent:
 
 ```bash
-./bin/booktracker-import.sh
+./bin/booktracker-import.sh get-inpx-fb2      # INPX (FB2 only)
+./bin/booktracker-import.sh get-inpx-all      # INPX "расширенный" (full)
+./bin/booktracker-import.sh get-dump          # database dump
+./bin/booktracker-import.sh get-monthly-fb2   # monthly FB2 archive (previous month)
+./bin/booktracker-import.sh get-monthly-usr   # monthly non-FB2 archive (previous month)
 ```
 
-> The available options and their behavior will be documented here as the command-line interface is finalized.
+Or fetch all five in one go (each skips if already downloaded):
+
+```bash
+./bin/booktracker-import.sh all
+```
+
+Each `get-*` command accepts an optional output directory and automatically
+logs in when needed:
+
+```bash
+./bin/booktracker-import.sh get-inpx-all /path/to/torrents
+```
+
+Validate a torrent file and inspect/compare its timestamp:
+
+```bash
+./bin/booktracker-import.sh check /path/to/file.torrent            # print timestamp
+./bin/booktracker-import.sh check /path/to/file.torrent 2026-07-01 # also compare to a date
+```
+
+Perform a dry run (no downloads):
+
+```bash
+./bin/booktracker-import.sh --dry-run get-dump
+```
+
+Enable debug logging:
+
+```bash
+./bin/booktracker-import.sh --debug get-inpx-fb2
+```
+
+### Functions
+
+The reusable building blocks live in `lib/booktracker-import_functions.sh`:
+
+| Function | Purpose |
+| --- | --- |
+| `login` | Authenticate against booktracker.org and persist the session cookie. |
+| `get_torrent_timestamp` | Print a torrent's bencoded `creation date` (unix epoch). |
+| `is_valid_timestamp` | Compare a torrent timestamp to a reference date (`>=`). |
+| `is_valid_torrent` | Validate a torrent file's bencoded structure. |
+| `get_inpx_fb2` | Download the INPX (FB2 only) `.torrent`. |
+| `get_inpx_all` | Download the INPX ("расширенный") `.torrent`. |
+| `get_dump` | Download the database dump `.torrent`. |
+| `get_monthly_fb2` | Discover + download the previous month's FB2 archive. |
+| `get_monthly_usr` | Discover + download the previous month's non-FB2 archive. |
+| `prune` | Remove archived torrents older than the retention window. |
+| `list_downloads` | Print the download state/history file. |
+| `all` | Run all five `get-*` targets in sequence. |
+| `log` / `log_info` / `log_warn` / `log_error` / `debug` | Leveled logging. |
 
 ## Configuration
 
@@ -132,9 +180,39 @@ Project configuration is stored in:
 config/config.sh
 ```
 
-Configuration should contain environment- or installation-specific settings rather than application logic.
+Configuration contains environment- or installation-specific settings rather
+than application logic.
 
-Local paths, credentials, cookies, and other private information should not be committed to the repository.
+Credentials are read from the environment variables `BOOKTRACKER_USERNAME` and
+`BOOKTRACKER_PASSWORD`, or from a gitignored `.env` file in the project root:
+
+```bash
+cp .env.example .env
+# edit .env and fill in BOOKTRACKER_USERNAME / BOOKTRACKER_PASSWORD
+```
+
+Key settings (all overridable via environment or `.env`):
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BOOKTRACKER_BASE_URL` | `https://booktracker.org` | Tracker base URL. |
+| `BOOKTRACKER_USERNAME` / `BOOKTRACKER_PASSWORD` | *(empty)* | Login credentials. |
+| `TOPIC_INPX_ALL` | `64690` | Topic id of the "расширенный" INPX release. |
+| `TOPIC_INPX_FB2` | `67944` | Topic id of the FB2-only INPX release. |
+| `TOPIC_DUMP` | `73862` | Topic id of the database dump release. |
+| `FORUM_MONTHLY` | `255` | Forum id for the monthly archives. |
+| `MONTH_OFFSET` | `1` | How many months back the monthly archives refer to. |
+| `DATA_DIR` / `LOG_DIR` | project `data/` / `logs/` | Runtime data / logs. |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
+| `DRY_RUN` | `0` | Set `1` to print actions without downloading. |
+| `TORRENT_NAME_PREFIX` | `flibusta` | Prefix for saved torrent file names. |
+| `ARCHIVE_DIR` | project `data/archive/` | Where superseded torrents are moved. |
+| `ARCHIVE_TORRENTS` | `1` | `1` = archive superseded files, `0` = delete them. |
+| `TORRENT_RETENTION_DAYS` | `0` | Prune archive files older than N days (`0` = keep). |
+| `STATE_FILE` | project `data/downloads.tsv` | Download state/history log. |
+
+Local paths, credentials, cookies, and other private information are not
+committed to the repository (see `.gitignore`).
 
 ## Logging
 
@@ -156,7 +234,69 @@ Automated tests are located in:
 tests/
 ```
 
-Tests can be run using the project's test framework once the test suite is installed and configured.
+Run the bash test suite (no network required):
+
+```bash
+bash tests/run_tests.sh
+```
+
+## How it works
+
+1. **Login** — `POST login.php` with `login_username`, `login_password`,
+   `login`, `redirect` and `autologin`; the session is kept in a curl cookie
+   jar. Success is detected by the presence of a logout link on the index page.
+2. **Discover** — fixed topics (INPX/dump) are addressed by their configured
+   topic ids; the monthly archives are located by searching forum `255` for the
+   title `Архив книг за <месяц> <год> года (FB2,` / `[не-FB2,`, where the month
+   is `MONTH_OFFSET` months before the current date.
+3. **Download** — the topic page is parsed for its `download.php?id=` torrent
+   link (the anchor labeled "Скачать .torrent"; the `dl.php?id=` / `dl.php?t=`
+   schemes used by other TorrentPier versions are also handled), and the
+   `.torrent` file is downloaded.
+4. **Verify** — `is_valid_torrent` checks the bencoded structure;
+   `is_valid_timestamp` compares the torrent `creation date` against the first
+   day of the target month so stale releases are rejected.
+5. **Name & retire** — the torrent is saved with a meaningful name (see below)
+   and any superseded same-type file is moved to the archive directory.
+
+## Torrent files & retention
+
+Downloaded torrents are stored under `data/torrents/` and named
+`<prefix>-<type>-<stamp>.torrent`:
+
+| Type | Example name | Stamp |
+| --- | --- | --- |
+| `inpx-fb2` | `flibusta-inpx-fb2-2026-08-01.torrent` | torrent creation date |
+| `inpx-all` | `flibusta-inpx-all-2026-08-01.torrent` | torrent creation date |
+| `dump` | `flibusta-dump-2026-08-01.torrent` | torrent creation date |
+| `monthly-fb2` | `flibusta-monthly-fb2-2026-07.torrent` | coverage month |
+| `monthly-usr` | `flibusta-monthly-usr-2026-07.torrent` | coverage month |
+
+Retention keeps `data/torrents/` tidy by holding only the latest file per type:
+
+* **Archive** — when a newer torrent of the same type is downloaded, the
+  previous file is moved to `data/archive/` (`ARCHIVE_TORRENTS=1`) or deleted
+  (`ARCHIVE_TORRENTS=0`).
+* **Prune** — `./bin/booktracker-import.sh prune` deletes archived `.torrent`
+  files older than `TORRENT_RETENTION_DAYS` days (`0` = keep forever).
+
+### Download state file
+
+Every successful download appends a row to `data/downloads.tsv` (tab-separated):
+
+```text
+downloaded_at            type        topic   stamp       url                            filename
+2026-08-14T16:22:56Z     inpx-fb2    67944   2026-08-01  https://…/download.php?id=1    flibusta-inpx-fb2-2026-08-01.torrent
+```
+
+View it with `./bin/booktracker-import.sh history`.  This state enables
+incremental runs and auditing; it is also gitignored.
+
+**Incremental runs** — before downloading, each `get-*` command checks the state
+file: if the topic's current `.torrent` link (same `type` + `url`) is already
+recorded, the download is skipped.  Use `--force` to re-download anyway.  This
+makes repeated runs cheap and idempotent while still picking up newly uploaded
+versions (whose download url changes).
 
 ## Design Goals
 
@@ -175,6 +315,10 @@ The project follows these principles:
 **Development**
 
 The project is under active development. The command-line interface, configuration options, and supported import workflow may change as functionality is added.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the change history.
 
 ## License
 

@@ -3,11 +3,18 @@
 # ==========================================
 .env
 .env.*
+!.env.example
 *.env
 secrets/
 credentials.txt
 *.pem
 *.key
+
+# ==========================================
+# Runtime Data (session cookies, downloaded torrents)
+# ==========================================
+data/*
+!data/.gitkeep
 
 # ==========================================
 # Script Execution Outputs and Logging
