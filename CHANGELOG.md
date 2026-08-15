@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
   - `is_valid_torrent` — validate a torrent's bencoded structure.
 - Download commands for the Флибуста releases: `get-inpx-fb2`, `get-inpx-all`,
   `get-dump`, `get-monthly-fb2`, and `get-monthly-usr`.
+- `check` command to validate a torrent file and print/compare its timestamp.
+- `history` command to show the download state/history (TSV).
+- `prune` command to delete archived torrents older than the retention window.
 - Automatic discovery of the previous month's archive topics by Russian month
   name (`Архив книг за <месяц> <год> года (FB2,` / `[не-FB2,`).
 - Runtime discovery of forum/topic ids by title (`get_forumid`, `get_topicid`),
