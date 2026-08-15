@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
   `get-dump`, `get-monthly-fb2`, and `get-monthly-usr`.
 - Automatic discovery of the previous month's archive topics by Russian month
   name (`Архив книг за <месяц> <год> года (FB2,` / `[не-FB2,`).
+- Runtime discovery of forum/topic ids by title (`get_forumid`, `get_topicid`),
+  so releases stay resolvable even as the site's numeric ids change.
 - Meaningful torrent file naming (`flibusta-<type>-<stamp>.torrent`).
 - Archive/retention — superseded torrents are moved to `data/archive/` and can
   be pruned by age via the `prune` command.
@@ -30,8 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
 - Bash test suite (`tests/run_tests.sh`) covering the pure functions.
 - `.gitignore` rules to keep credentials and runtime data out of version control.
 
+### Changed
+
+- Replaced the hardcoded INPX/dump topic ids and the monthly forum id with
+  live title-based discovery (`get_forumid` / `get_topicid`).
+
 ### Fixed
 
+- CLI options (`-f`, `-n`, `-d`) are now accepted after the command as well as
+  before it (`all -f` no longer treats `-f` as the output directory).
+- Updated the INPX topic search fragments to match the current release titles
+  (the "расширенный"/"только FB2" wording was replaced by "…FLibrary + inpx"
+  and "Дополнительные данные…").
 - Torrent link extraction now targets the anchor labeled "Скачать .torrent"
   (`download.php?id=…`) so helper attachments are ignored.
 - Torrent `creation date` parsing and UTC-consistent date comparisons.

@@ -51,6 +51,8 @@ Options:
   -f, --force              Re-download even if already recorded
   -h, --help               Show this help
 
+Options may appear before or after the command (e.g. `all -f`).
+
 Credentials are read from BOOKTRACKER_USERNAME / BOOKTRACKER_PASSWORD
 (environment variables or a gitignored .env file in the project root).
 EOF
@@ -58,9 +60,12 @@ EOF
 
 main() {
     local arg cmd=""
+    local -a pos=()
     DRY_RUN="${DRY_RUN:-0}"
     FORCE="${FORCE:-0}"
 
+    # Options are accepted before or after the command; every non-option is
+    # either the command (first) or a positional argument to it.
     while (( $# )); do
         arg="$1"
         case "$arg" in
@@ -83,9 +88,11 @@ main() {
                 return 2
                 ;;
             *)
-                cmd="$arg"
-                shift
-                break
+                if [[ -z "$cmd" ]]; then
+                    cmd="$arg"
+                else
+                    pos+=("$arg")
+                fi
                 ;;
         esac
         shift
@@ -101,19 +108,19 @@ main() {
             login
             ;;
         get-inpx-fb2)
-            get_inpx_fb2 "${1:-}"
+            get_inpx_fb2 "${pos[0]:-}"
             ;;
         get-inpx-all)
-            get_inpx_all "${1:-}"
+            get_inpx_all "${pos[0]:-}"
             ;;
         get-dump)
-            get_dump "${1:-}"
+            get_dump "${pos[0]:-}"
             ;;
         get-monthly-fb2)
-            get_monthly_fb2 "${1:-}"
+            get_monthly_fb2 "${pos[0]:-}"
             ;;
         get-monthly-usr)
-            get_monthly_usr "${1:-}"
+            get_monthly_usr "${pos[0]:-}"
             ;;
         prune)
             prune
@@ -122,10 +129,10 @@ main() {
             list_downloads
             ;;
         all)
-            all "${1:-}"
+            all "${pos[0]:-}"
             ;;
         check)
-            local file="${1:-}" ref_date="${2:-}" ts
+            local file="${pos[0]:-}" ref_date="${pos[1]:-}" ts
             if [[ -z "$file" ]]; then
                 log_error "check requires a torrent file argument"
                 return 2

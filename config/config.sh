@@ -45,17 +45,19 @@ LOG_LEVEL="${LOG_LEVEL:-info}"
 export LOG_LEVEL
 
 # --- Flibusta forums / topics ----------------------------------------------
-# Forum and topic ids for the Флибуста library sections.
-FORUM_FLIBUSTA="${FORUM_FLIBUSTA:-245}"                # Библиотека Флибуста
-FORUM_FULL_COLLECTIONS="${FORUM_FULL_COLLECTIONS:-256}" # Полные сборки библиотеки Флибуста
-FORUM_MONTHLY="${FORUM_MONTHLY:-255}"                  # Ежемесячные архивы (Флибуста)
+# Forum and topic ids change over time, so the scripts resolve them at runtime
+# from the live site HTML rather than relying on fixed ids.  These are the
+# stable text fragments used to identify each section/release (matched
+# case-insensitively as literal substrings).
+FORUM_FULL_COLLECTIONS_TITLE="${FORUM_FULL_COLLECTIONS_TITLE:-Полные сборки библиотеки Флибуста}"
+FORUM_MONTHLY_TITLE="${FORUM_MONTHLY_TITLE:-Ежемесячные архивы (Флибуста)}"
 
-TOPIC_INPX_ALL="${TOPIC_INPX_ALL:-64690}"              # inpx для библиотеки Flibusta "расширенный"
-TOPIC_INPX_FB2="${TOPIC_INPX_FB2:-67944}"              # INPX для библиотеки Flibusta (только FB2)
-TOPIC_DUMP="${TOPIC_DUMP:-73862}"                      # Дампы базы данных библиотеки Флибуста
+TOPIC_INPX_ALL_TITLE="${TOPIC_INPX_ALL_TITLE:-inpx}"                  # full collection ("7z + FLibrary + inpx")
+TOPIC_INPX_FB2_TITLE="${TOPIC_INPX_FB2_TITLE:-Дополнительные данные}" # FB2-only data release
+TOPIC_DUMP_TITLE="${TOPIC_DUMP_TITLE:-Дампы базы данных библиотеки Флибуста}"
 
-export FORUM_FLIBUSTA FORUM_FULL_COLLECTIONS FORUM_MONTHLY
-export TOPIC_INPX_ALL TOPIC_INPX_FB2 TOPIC_DUMP
+export FORUM_FULL_COLLECTIONS_TITLE FORUM_MONTHLY_TITLE
+export TOPIC_INPX_ALL_TITLE TOPIC_INPX_FB2_TITLE TOPIC_DUMP_TITLE
 
 # --- Monthly archives -------------------------------------------------------
 # How many months back the "monthly" archives refer to (1 = previous month).

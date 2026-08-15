@@ -162,6 +162,8 @@ The reusable building blocks live in `lib/booktracker-import_functions.sh`:
 | `get_torrent_timestamp` | Print a torrent's bencoded `creation date` (unix epoch). |
 | `is_valid_timestamp` | Compare a torrent timestamp to a reference date (`>=`). |
 | `is_valid_torrent` | Validate a torrent file's bencoded structure. |
+| `get_forumid` | Resolve a forum's id by searching the index page for its title. |
+| `get_topicid` | Resolve a topic's id by searching a forum listing for its title. |
 | `get_inpx_fb2` | Download the INPX (FB2 only) `.torrent`. |
 | `get_inpx_all` | Download the INPX ("расширенный") `.torrent`. |
 | `get_dump` | Download the database dump `.torrent`. |
@@ -200,10 +202,11 @@ Key settings (all overridable via environment or `.env`):
 | --- | --- | --- |
 | `BOOKTRACKER_BASE_URL` | `https://booktracker.org` | Tracker base URL. |
 | `BOOKTRACKER_USERNAME` / `BOOKTRACKER_PASSWORD` | *(empty)* | Login credentials. |
-| `TOPIC_INPX_ALL` | `64690` | Topic id of the "расширенный" INPX release. |
-| `TOPIC_INPX_FB2` | `67944` | Topic id of the FB2-only INPX release. |
-| `TOPIC_DUMP` | `73862` | Topic id of the database dump release. |
-| `FORUM_MONTHLY` | `255` | Forum id for the monthly archives. |
+| `FORUM_FULL_COLLECTIONS_TITLE` | `Полные сборки библиотеки Флибуста` | Title used to locate the full-collections forum. |
+| `FORUM_MONTHLY_TITLE` | `Ежемесячные архивы (Флибуста)` | Title used to locate the monthly archives forum. |
+| `TOPIC_INPX_ALL_TITLE` | `inpx` | Title fragment of the full collection ("7z + FLibrary + inpx"). |
+| `TOPIC_INPX_FB2_TITLE` | `Дополнительные данные` | Title fragment of the FB2-only data release. |
+| `TOPIC_DUMP_TITLE` | `Дампы базы данных библиотеки Флибуста` | Title fragment of the database dump release. |
 | `MONTH_OFFSET` | `1` | How many months back the monthly archives refer to. |
 | `DATA_DIR` / `LOG_DIR` | project `data/` / `logs/` | Runtime data / logs. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
@@ -248,10 +251,13 @@ bash tests/run_tests.sh
 1. **Login** — `POST login.php` with `login_username`, `login_password`,
    `login`, `redirect` and `autologin`; the session is kept in a curl cookie
    jar. Success is detected by the presence of a logout link on the index page.
-2. **Discover** — fixed topics (INPX/dump) are addressed by their configured
-   topic ids; the monthly archives are located by searching forum `255` for the
-   title `Архив книг за <месяц> <год> года (FB2,` / `[не-FB2,`, where the month
-   is `MONTH_OFFSET` months before the current date.
+2. **Discover** — forum and topic ids are not hardcoded (they change over
+   time).  `get_forumid` locates a forum by its title on `index.php`, then
+   `get_topicid` locates a topic by its title on the forum listing
+   (`viewforum.php`).  The INPX/dump releases are found in the "Полные сборки"
+   forum; the monthly archives are found in the "Ежемесячные архивы" forum
+   under `Архив книг за <месяц> <год> года (FB2,` / `[не-FB2,`, where the
+   month is `MONTH_OFFSET` months before the current date.
 3. **Download** — the topic page is parsed for its `download.php?id=` torrent
    link (the anchor labeled "Скачать .torrent"; the `dl.php?id=` / `dl.php?t=`
    schemes used by other TorrentPier versions are also handled), and the

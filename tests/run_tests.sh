@@ -147,20 +147,52 @@ assert_fail "_extract_torrent_link fails when no link present" \
     _extract_torrent_link '<html>no links here</html>'
 
 # =============================================================================
-# _find_topic_id (with a mocked _http_get)
+# get_forumid / get_topicid (with a mocked _http_get)
 # =============================================================================
-FAKE_FORUM_HTML='<a href="./viewtopic.php?t=105053" class="torTopic"><b>Архив книг за июль 2026 года (FB2, 879582-88339<wbr>4)</b></a>
-<a href="./viewtopic.php?t=105052" class="torTopic"><b>Архив книг за июль 2026 года [не-FB2, 123-456]</b></a>'
-_http_get() { printf '%s' "$FAKE_FORUM_HTML"; }
+FAKE_INDEX_HTML='<span class="sf_title"><a href="./viewforum.php?f=256">Полные сборки библиотеки Флибуста</a></span>
+<a href="./viewforum.php?f=253">Ежедневные обновления (Флибуста)</a>
+<a href="./viewforum.php?f=255">Ежемесячные архивы (Флибуста)</a>
+<a href="./viewforum.php?f=254">Еженедельные архивы (Флибуста)</a>'
 
-assert_eq "_find_topic_id finds the FB2 monthly topic" \
+FAKE_FORUM_HTML='<a href="./viewtopic.php?t=104183" class="torTopic"><b>Флибуста (Flibusta) & Либрусек (lib.rus.ec)<wbr> 7z + FLibrary + inpx (2009-2026) [FB2+EPUB] на 01.08.2026 [локальная коллекция, ежемесячно пополняемая]</b></a>
+<a href="./viewtopic.php?t=104536" class="torTopic"><b>Дополнительн<wbr>ые данные библиотеки Flibusta [FB2] для FLibrary, 01.08.2026</b></a>
+<a href="viewtopic.php?t=73862">Дампы базы данных библиотеки Флибуста по состоянию на 01.08.2026</a>
+<a href="./viewtopic.php?t=105053" class="torTopic"><b>Архив книг за июль 2026 года (FB2, 879582-88339<wbr>4)</b></a>
+<a href="./viewtopic.php?t=105052" class="torTopic"><b>Архив книг за июль 2026 года [не-FB2, 123-456]</b></a>'
+
+_http_get() {
+    case "$1" in
+        *index.php) printf '%s' "$FAKE_INDEX_HTML" ;;
+        *)          printf '%s' "$FAKE_FORUM_HTML" ;;
+    esac
+}
+
+assert_eq "get_forumid resolves the full-collections forum by title" \
+    "256" \
+    "$(get_forumid 'Полные сборки библиотеки Флибуста')"
+assert_eq "get_forumid resolves the monthly forum by title" \
+    "255" \
+    "$(get_forumid 'Ежемесячные архивы (Флибуста)')"
+assert_fail "get_forumid fails when no forum matches" \
+    get_forumid 'Несуществующий раздел'
+
+assert_eq "get_topicid finds the INPX (full) topic by title" \
+    "104183" \
+    "$(get_topicid 256 'inpx')"
+assert_eq "get_topicid finds the INPX (FB2 only) topic by title" \
+    "104536" \
+    "$(get_topicid 256 'Дополнительные данные')"
+assert_eq "get_topicid finds the dump topic (no torTopic class) by title" \
+    "73862" \
+    "$(get_topicid 256 'Дампы базы данных библиотеки Флибуста')"
+assert_eq "get_topicid finds the FB2 monthly topic by title" \
     "105053" \
-    "$(_find_topic_id 255 'Архив книг за июль 2026 года \(FB2,')"
-assert_eq "_find_topic_id finds the non-FB2 monthly topic" \
+    "$(get_topicid 255 'Архив книг за июль 2026 года (FB2,')"
+assert_eq "get_topicid finds the non-FB2 monthly topic by title" \
     "105052" \
-    "$(_find_topic_id 255 'Архив книг за июль 2026 года \[не-FB2,')"
-assert_fail "_find_topic_id returns failure when nothing matches" \
-    _find_topic_id 255 'Ничего подобного'
+    "$(get_topicid 255 'Архив книг за июль 2026 года [не-FB2,')"
+assert_fail "get_topicid fails when nothing matches" \
+    get_topicid 255 'Ничего подобного'
 
 # =============================================================================
 # Logging levels
@@ -279,6 +311,17 @@ all 2>/dev/null
 all_rc=$?
 assert_eq "all invokes all five targets" "5" "$_call_count"
 assert_eq "all returns non-zero when any target fails" "1" "$all_rc"
+
+# =============================================================================
+# CLI argument parsing (bin/booktracker-import.sh)
+# =============================================================================
+make_valid_torrent "$REF_EPOCH" > "$FIXTURE_DIR/cli.torrent"
+
+cli_rc="$(bash "$PROJECT_ROOT/bin/booktracker-import.sh" check "$FIXTURE_DIR/cli.torrent" -f >/dev/null 2>&1; echo $?)"
+assert_eq "CLI: -f after 'check' is a flag, not a date" "0" "$cli_rc"
+
+cli_rc="$(bash "$PROJECT_ROOT/bin/booktracker-import.sh" check -f "$FIXTURE_DIR/cli.torrent" >/dev/null 2>&1; echo $?)"
+assert_eq "CLI: -f before 'check' still works" "0" "$cli_rc"
 
 # --- Summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

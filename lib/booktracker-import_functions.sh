@@ -31,10 +31,11 @@ _BOOKTRACKER_FUNCTIONS_LOADED=1
 : "${VERIFY_TORRENT:=1}"
 : "${FORCE:=0}"
 : "${MONTH_OFFSET:=1}"
-: "${FORUM_MONTHLY:=255}"
-: "${TOPIC_INPX_ALL:=64690}"
-: "${TOPIC_INPX_FB2:=67944}"
-: "${TOPIC_DUMP:=73862}"
+: "${FORUM_FULL_COLLECTIONS_TITLE:=Полные сборки библиотеки Флибуста}"
+: "${FORUM_MONTHLY_TITLE:=Ежемесячные архивы (Флибуста)}"
+: "${TOPIC_INPX_ALL_TITLE:=inpx}"
+: "${TOPIC_INPX_FB2_TITLE:=Дополнительные данные}"
+: "${TOPIC_DUMP_TITLE:=Дампы базы данных библиотеки Флибуста}"
 : "${TORRENT_NAME_PREFIX:=flibusta}"
 : "${ARCHIVE_DIR:=${DATA_DIR}/archive}"
 : "${ARCHIVE_TORRENTS:=1}"
@@ -261,29 +262,73 @@ _torrent_stamp() {
 }
 
 # =============================================================================
-# Topic discovery
+# Forum / topic discovery
 # =============================================================================
 
-# _find_topic_id <forum_id> <title_regex>
-# Search a forum listing for the first topic whose title matches <title_regex>
-# and print its numeric topic id.  Returns 0 on success, 1 when not found.
-_find_topic_id() {
-    local forum_id="$1" title_re="$2" html line tid
+# _html_to_text <html>
+# Best-effort conversion of an HTML fragment to searchable plain text: strips
+# tags (including <wbr> soft line-breaks) and decodes the entities seen in
+# booktracker.org titles.
+_html_to_text() {
+    printf '%s' "$1" \
+        | sed -e 's/<[^>]*>//g' \
+              -e 's/&quot;/"/g' \
+              -e 's/&nbsp;/ /g'
+}
+
+# get_forumid <title>
+# Determine a forum's numeric id by searching the main index page for the forum
+# link whose (tag-stripped) text contains <title>.  Forum ids are not stable
+# across site updates, so they are always resolved from the live HTML.
+# Prints the id; returns 0 on success, 1 when not found.
+get_forumid() {
+    local title="$1" html line fid text
+    html="$(_http_get "$BOOKTRACKER_BASE_URL/index.php" 2>/dev/null)" || {
+        log_error "failed to fetch index page: $BOOKTRACKER_BASE_URL/index.php"
+        return 1
+    }
+
+    while IFS= read -r line; do
+        [[ "$line" == *"viewforum.php?f="* ]] || continue
+        fid="$(printf '%s' "$line" | grep -oE 'viewforum\.php\?f=[0-9]+' | head -n1)"
+        fid="${fid#viewforum.php?f=}"
+        [[ "$fid" =~ ^[0-9]+$ ]] || continue
+        text="$(_html_to_text "$line")"
+        if printf '%s' "$text" | grep -qiF -- "$title"; then
+            printf '%s\n' "$fid"
+            return 0
+        fi
+    done < <(printf '%s\n' "$html")
+
+    log_warn "forum not found on index page: '$title'"
+    return 1
+}
+
+# get_topicid <forum_id> <title>
+# Determine a topic's numeric id by searching the forum listing for the topic
+# link whose (tag-stripped) title contains <title>.  Topic ids change whenever
+# a new release is posted, so they are always resolved from the live HTML.
+# Prints the id; returns 0 on success, 1 when not found.
+get_topicid() {
+    local forum_id="$1" title="$2" html line tid text
     html="$(_http_get "$BOOKTRACKER_BASE_URL/viewforum.php?f=$forum_id" 2>/dev/null)" || {
         log_error "failed to fetch forum $forum_id"
         return 1
     }
 
     while IFS= read -r line; do
-        tid="${line#*t=}"
-        tid="${tid%%\"*}"
+        [[ "$line" == *"viewtopic.php?t="* ]] || continue
+        tid="$(printf '%s' "$line" | grep -oE 'viewtopic\.php\?t=[0-9]+' | head -n1)"
+        tid="${tid#viewtopic.php?t=}"
         [[ "$tid" =~ ^[0-9]+$ ]] || continue
-        if printf '%s' "$line" | grep -qE "$title_re"; then
+        text="$(_html_to_text "$line")"
+        if printf '%s' "$text" | grep -qiF -- "$title"; then
             printf '%s\n' "$tid"
             return 0
         fi
-    done < <(printf '%s' "$html" | grep -oE 'viewtopic\.php\?t=[0-9]+" class="torTopic"><b>[^<]*')
+    done < <(printf '%s\n' "$html")
 
+    log_warn "topic not found in forum $forum_id: '$title'"
     return 1
 }
 
@@ -503,49 +548,57 @@ _download_and_verify() {
 
 # get_inpx_fb2 [output_dir] — INPX для библиотеки Flibusta (только FB2)
 get_inpx_fb2() {
-    local out_dir="${1:-$TORRENT_DIR}"
-    log_info "fetching INPX (FB2 only) torrent (topic $TOPIC_INPX_FB2)"
-    _download_and_verify "$TOPIC_INPX_FB2" "$out_dir" "" "inpx-fb2"
+    local out_dir="${1:-$TORRENT_DIR}" forum tid
+    forum="$(get_forumid "$FORUM_FULL_COLLECTIONS_TITLE")" || return 1
+    log_info "fetching INPX (FB2 only) torrent (searching '$TOPIC_INPX_FB2_TITLE')"
+    tid="$(get_topicid "$forum" "$TOPIC_INPX_FB2_TITLE")" || return 1
+    _download_and_verify "$tid" "$out_dir" "" "inpx-fb2"
 }
 
 # get_inpx_all [output_dir] — inpx для библиотеки Flibusta "расширенный"
 get_inpx_all() {
-    local out_dir="${1:-$TORRENT_DIR}"
-    log_info "fetching INPX (full) torrent (topic $TOPIC_INPX_ALL)"
-    _download_and_verify "$TOPIC_INPX_ALL" "$out_dir" "" "inpx-all"
+    local out_dir="${1:-$TORRENT_DIR}" forum tid
+    forum="$(get_forumid "$FORUM_FULL_COLLECTIONS_TITLE")" || return 1
+    log_info "fetching INPX (full) torrent (searching '$TOPIC_INPX_ALL_TITLE')"
+    tid="$(get_topicid "$forum" "$TOPIC_INPX_ALL_TITLE")" || return 1
+    _download_and_verify "$tid" "$out_dir" "" "inpx-all"
 }
 
 # get_dump [output_dir] — Дампы базы данных библиотеки Флибуста
 get_dump() {
-    local out_dir="${1:-$TORRENT_DIR}"
-    log_info "fetching database dump torrent (topic $TOPIC_DUMP)"
-    _download_and_verify "$TOPIC_DUMP" "$out_dir" "" "dump"
+    local out_dir="${1:-$TORRENT_DIR}" forum tid
+    forum="$(get_forumid "$FORUM_FULL_COLLECTIONS_TITLE")" || return 1
+    log_info "fetching database dump torrent (searching '$TOPIC_DUMP_TITLE')"
+    tid="$(get_topicid "$forum" "$TOPIC_DUMP_TITLE")" || return 1
+    _download_and_verify "$tid" "$out_dir" "" "dump"
 }
 
 # get_monthly_fb2 [output_dir] — monthly FB2 archive (previous month)
 get_monthly_fb2() {
-    local out_dir="${1:-$TORRENT_DIR}" year month ru tid title_re ref_date
+    local out_dir="${1:-$TORRENT_DIR}" forum tid year month ru title ref_date
     read -r year month ru <<< "$(_monthly_target)" || return 1
-    title_re="Архив книг за ${ru} ${year} года \(FB2,"
-    log_info "looking for monthly FB2 archive: '${ru} ${year} года (FB2,'"
-    if ! tid="$(_find_topic_id "$FORUM_MONTHLY" "$title_re")"; then
-        log_error "monthly FB2 topic not found in forum $FORUM_MONTHLY"
+    title="Архив книг за ${ru} ${year} года (FB2,"
+    log_info "looking for monthly FB2 archive: '$title'"
+    forum="$(get_forumid "$FORUM_MONTHLY_TITLE")" || return 1
+    tid="$(get_topicid "$forum" "$title")" || {
+        log_error "monthly FB2 topic not found in forum $forum"
         return 1
-    fi
+    }
     ref_date="${year}-${month}-01"
     _download_and_verify "$tid" "$out_dir" "$ref_date" "monthly-fb2" "${year}-${month}"
 }
 
 # get_monthly_usr [output_dir] — monthly non-FB2 archive (previous month)
 get_monthly_usr() {
-    local out_dir="${1:-$TORRENT_DIR}" year month ru tid title_re ref_date
+    local out_dir="${1:-$TORRENT_DIR}" forum tid year month ru title ref_date
     read -r year month ru <<< "$(_monthly_target)" || return 1
-    title_re="Архив книг за ${ru} ${year} года \[не-FB2,"
-    log_info "looking for monthly non-FB2 archive: '${ru} ${year} года [не-FB2,'"
-    if ! tid="$(_find_topic_id "$FORUM_MONTHLY" "$title_re")"; then
-        log_error "monthly non-FB2 topic not found in forum $FORUM_MONTHLY"
+    title="Архив книг за ${ru} ${year} года [не-FB2,"
+    log_info "looking for monthly non-FB2 archive: '$title'"
+    forum="$(get_forumid "$FORUM_MONTHLY_TITLE")" || return 1
+    tid="$(get_topicid "$forum" "$title")" || {
+        log_error "monthly non-FB2 topic not found in forum $forum"
         return 1
-    fi
+    }
     ref_date="${year}-${month}-01"
     _download_and_verify "$tid" "$out_dir" "$ref_date" "monthly-usr" "${year}-${month}"
 }
