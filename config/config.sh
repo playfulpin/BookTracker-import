@@ -79,3 +79,10 @@ export TORRENT_NAME_PREFIX ARCHIVE_DIR ARCHIVE_TORRENTS TORRENT_RETENTION_DAYS S
 DRY_RUN="${DRY_RUN:-0}"            # 1 = print actions, do not download
 VERIFY_TORRENT="${VERIFY_TORRENT:-1}" # 1 = validate downloaded torrents
 export DRY_RUN VERIFY_TORRENT
+
+# --- Staging ----------------------------------------------------------------
+# Which files to download from the database dump torrent.  Only these core
+# library tables are fetched; the .zip attached archives, the annotations
+# tables, lib.md5.txt.gz, and lib.reviews.sql.gz are skipped.
+DUMP_ALLOWLIST="${DUMP_ALLOWLIST:-lib.libavtor.sql.gz lib.libavtorname.sql.gz lib.libbook.sql.gz lib.libfilename.sql.gz lib.libgenre.sql.gz lib.libgenrelist.sql.gz lib.libjoinedbooks.sql.gz lib.librate.sql.gz lib.librecs.sql.gz lib.libseq.sql.gz lib.libseqname.sql.gz lib.libtranslator.sql.gz}"
+export DUMP_ALLOWLIST

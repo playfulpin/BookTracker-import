@@ -8,6 +8,7 @@ The project automates the process of finding, extracting, downloading, and organ
 
 * Extract book torrent information from the configured source.
 * Import torrent files into a local collection.
+* Stage torrent contents into a local directory, downloading only allowed files for selective releases.
 * Organize imported books according to the configured library structure.
 * Avoid importing files that have already been processed.
 * Support repeatable/incremental imports.
@@ -21,11 +22,13 @@ The project automates the process of finding, extracting, downloading, and organ
 ```text
 booktracker-import/
 ├── bin/
-│   └── booktracker-import.sh
+│   ├── booktracker-import.sh
+│   └── booktracker-stage.sh
 ├── config/
 │   └── config.sh
 ├── lib/
-│   └── booktracker-import_functions.sh
+│   ├── booktracker-import_functions.sh
+│   └── booktracker-stage_functions.sh
 ├── data/
 │   └── .gitkeep
 ├── logs/
@@ -40,7 +43,8 @@ booktracker-import/
 
 ### `bin/`
 
-Contains the main executable script.
+Contains the executable scripts (`booktracker-import.sh` downloads the
+`.torrent` metadata; `booktracker-stage.sh` downloads their contents).
 
 ### `config/`
 
@@ -48,7 +52,7 @@ Contains configuration parameters such as source URLs, local paths, and import o
 
 ### `lib/`
 
-Contains reusable shell functions used by the main script.
+Contains reusable shell functions used by the scripts.
 
 ### `data/`
 
@@ -74,6 +78,7 @@ Required utilities:
 * GNU `grep` (with `-o`/`-a`)
 * GNU `date` (with `-d`/`-u`)
 * `head`, `cut`, `du` (coreutils)
+* `aria2c` and `gzip` (for staging torrent payloads)
 
 ## Installation
 
@@ -84,11 +89,13 @@ git clone https://github.com/playfulpin/BookTracker-import.git
 cd booktracker-import
 ```
 
-Make the main script executable:
+Make the scripts executable:
 
 ```bash
-chmod +x bin/booktracker-import.sh
+chmod +x bin/booktracker-import.sh bin/booktracker-stage.sh
 ```
+
+The staging script additionally requires `aria2c` (e.g. `sudo apt install aria2`).
 
 Configure the application:
 
@@ -152,6 +159,32 @@ Enable debug logging:
 ./bin/booktracker-import.sh --debug get-inpx-fb2
 ```
 
+### Staging (download torrent contents)
+
+After `booktracker-import.sh` has fetched the `.torrent` files, stage their
+contents with `bin/booktracker-stage.sh`.  `STAGING_DIR` (an absolute path) is
+required:
+
+```bash
+export STAGING_DIR=/path/to/staging
+./bin/booktracker-stage.sh                                 # every .torrent in data/torrents/
+./bin/booktracker-stage.sh data/torrents/flibusta-dump-2026-08-01.torrent
+```
+
+`aria2c` downloads the payloads.  Selective types fetch only allowed files:
+
+| Type | Downloaded | Staged to |
+| --- | --- | --- |
+| `inpx-fb2` / `inpx-all` | `*.inpx` | `STAGING/inpx/` |
+| `dump` | the 12 `DUMP_ALLOWLIST` tables | `STAGING/flibusta_gz/` (decompressed to `.sql`) |
+| `monthly-fb2` / `monthly-usr` | whole torrent | `STAGING/Latest/` |
+
+```bash
+./bin/booktracker-stage.sh --dry-run   # print what would happen
+./bin/booktracker-stage.sh --force     # re-stage already-staged torrents
+./bin/booktracker-stage.sh --debug     # debug logging
+```
+
 ### Functions
 
 The reusable building blocks live in `lib/booktracker-import_functions.sh`:
@@ -173,6 +206,17 @@ The reusable building blocks live in `lib/booktracker-import_functions.sh`:
 | `list_downloads` | Print the download state/history file. |
 | `all` | Run all five `get-*` targets in sequence. |
 | `log` / `log_info` / `log_warn` / `log_error` / `debug` | Leveled logging. |
+
+Staging helpers live in `lib/booktracker-stage_functions.sh`:
+
+| Function | Purpose |
+| --- | --- |
+| `stage_type_from_name` | Parse the torrent type from a `flibusta-<type>-<stamp>.torrent` filename. |
+| `stage_destination` | Map a torrent type to its `STAGING_DIR` subfolder. |
+| `stage_is_allowed` | Decide whether a file belongs to a type's allowlist. |
+| `stage_select_indexes` | Convert an aria2c file listing into `--select-file` indexes. |
+| `stage_is_done` / `stage_record` | Read / append the staging state file. |
+| `stage_place` | Copy a file into staging honoring collision rules. |
 
 ## Configuration
 
@@ -216,6 +260,10 @@ Key settings (all overridable via environment or `.env`):
 | `ARCHIVE_TORRENTS` | `1` | `1` = archive superseded files, `0` = delete them. |
 | `TORRENT_RETENTION_DAYS` | `0` | Prune archive files older than N days (`0` = keep). |
 | `STATE_FILE` | project `data/downloads.tsv` | Download state/history log. |
+| `STAGING_DIR` | *(none — required)* | Absolute path to the staging root (staging only). |
+| `DUMP_ALLOWLIST` | *(12 filenames)* | Dump files to download (staging only). |
+| `STAGED_STATE_FILE` | project `data/staged.tsv` | Staging state/history log (staging only). |
+| `ARIA2C_SEED_TIME` | `0` | Seconds to seed after download; `0` = stop (staging only). |
 
 Local paths, credentials, cookies, and other private information are not
 committed to the repository (see `.gitignore`).
@@ -271,6 +319,24 @@ types successfully.
    day of the target month so stale releases are rejected.
 5. **Name & retire** — the torrent is saved with a meaningful name (see below)
    and any superseded same-type file is moved to the archive directory.
+
+## How staging works
+
+`bin/booktracker-stage.sh` turns the `.torrent` metadata into staged payload
+files:
+
+1. **Select** — parse the torrent type from the filename, skip already-staged
+   torrents (unless `--force`), and list the torrent's files with
+   `aria2c --show-files`.
+2. **Download** — `aria2c --seed-time=0` fetches the payload into a working
+   directory, with `--select-file` restricting selective types to their
+   allowlist (`dump` → `DUMP_ALLOWLIST`, `inpx-*` → `*.inpx`).
+3. **Stage** — allowed files are moved into the `STAGING_DIR` subfolders
+   (`inpx/`, `Latest/`, `flibusta_gz/`); dump `.gz` files are decompressed to
+   `.sql`.
+4. **Archive & record** — the working directory is moved to `data/archive/`
+   and a row is appended to `data/staged.tsv`, so re-runs skip already-staged
+   torrents.
 
 ## Torrent files & retention
 

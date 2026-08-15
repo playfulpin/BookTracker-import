@@ -22,6 +22,7 @@ export DRY_RUN=0
 
 source "$PROJECT_ROOT/config/config.sh"
 source "$PROJECT_ROOT/lib/booktracker-import_functions.sh"
+source "$PROJECT_ROOT/lib/booktracker-stage_functions.sh"
 
 # --- Tiny assertion helpers -------------------------------------------------
 PASS=0
@@ -322,6 +323,184 @@ assert_eq "CLI: -f after 'check' is a flag, not a date" "0" "$cli_rc"
 
 cli_rc="$(bash "$PROJECT_ROOT/bin/booktracker-import.sh" check -f "$FIXTURE_DIR/cli.torrent" >/dev/null 2>&1; echo $?)"
 assert_eq "CLI: -f before 'check' still works" "0" "$cli_rc"
+
+# =============================================================================
+# Staging (booktracker-stage_functions.sh)
+# =============================================================================
+assert_eq "stage_type_from_name parses dump" \
+    "dump" \
+    "$(stage_type_from_name 'flibusta-dump-2026-08-01.torrent')"
+assert_eq "stage_type_from_name parses inpx-fb2" \
+    "inpx-fb2" \
+    "$(stage_type_from_name 'flibusta-inpx-fb2-2026-08-01.torrent')"
+assert_eq "stage_type_from_name parses inpx-all" \
+    "inpx-all" \
+    "$(stage_type_from_name 'flibusta-inpx-all-2026-08-01.torrent')"
+assert_eq "stage_type_from_name parses monthly-fb2" \
+    "monthly-fb2" \
+    "$(stage_type_from_name 'flibusta-monthly-fb2-2026-07.torrent')"
+assert_eq "stage_type_from_name parses monthly-usr" \
+    "monthly-usr" \
+    "$(stage_type_from_name 'flibusta-monthly-usr-2026-07.torrent')"
+assert_fail "stage_type_from_name rejects an unknown type" \
+    stage_type_from_name 'flibusta-foo-2026-08-01.torrent'
+
+assert_eq "stage_destination maps inpx-fb2" "inpx" "$(stage_destination inpx-fb2)"
+assert_eq "stage_destination maps inpx-all" "inpx" "$(stage_destination inpx-all)"
+assert_eq "stage_destination maps dump" "flibusta_gz" "$(stage_destination dump)"
+assert_eq "stage_destination maps monthly-fb2" "Latest" "$(stage_destination monthly-fb2)"
+assert_eq "stage_destination maps monthly-usr" "Latest" "$(stage_destination monthly-usr)"
+assert_fail "stage_destination rejects an unknown type" stage_destination foo
+
+# Dump file list — mirrors the real FlibustaSQL torrent inspected 2026-08-14.
+ARIA2_DUMP_FILES='Files:
+idx|path/length
+===+===========================================================================
+  1|lib.a.annotations.sql.gz
+  2|lib.a.annotations_pics.sql.gz
+  3|lib.a.attached.zip
+  4|lib.b.annotations.sql.gz
+  5|lib.b.annotations_pics.sql.gz
+  6|lib.b.attached.zip
+  7|lib.libavtor.sql.gz
+  8|lib.libavtorname.sql.gz
+  9|lib.libbook.sql.gz
+ 10|lib.libfilename.sql.gz
+ 11|lib.libgenre.sql.gz
+ 12|lib.libgenrelist.sql.gz
+ 13|lib.libjoinedbooks.sql.gz
+ 14|lib.librate.sql.gz
+ 15|lib.librecs.sql.gz
+ 16|lib.libseq.sql.gz
+ 17|lib.libseqname.sql.gz
+ 18|lib.libtranslator.sql.gz
+ 19|lib.md5.txt.gz
+ 20|lib.reviews.sql.gz'
+
+assert_eq "stage_select_indexes (dump) selects only allowed files" \
+    "7,8,9,10,11,12,13,14,15,16,17,18" \
+    "$(stage_select_indexes dump <<< "$ARIA2_DUMP_FILES")"
+
+assert_ok "stage_is_allowed (dump) allows lib.libbook.sql.gz" \
+    stage_is_allowed dump "lib.libbook.sql.gz"
+assert_fail "stage_is_allowed (dump) rejects lib.md5.txt.gz" \
+    stage_is_allowed dump "lib.md5.txt.gz"
+assert_fail "stage_is_allowed (dump) rejects a .zip archive" \
+    stage_is_allowed dump "lib.a.attached.zip"
+
+ARIA2_INPX_FILES='Files:
+idx|path/length
+===+===========
+  1|lib.inpx
+  2|books.fb2.7z
+  3|books.epub.7z'
+
+assert_eq "stage_select_indexes (inpx-fb2) selects only *.inpx" \
+    "1" \
+    "$(stage_select_indexes inpx-fb2 <<< "$ARIA2_INPX_FILES")"
+assert_eq "stage_select_indexes (inpx-all) selects only *.inpx" \
+    "1" \
+    "$(stage_select_indexes inpx-all <<< "$ARIA2_INPX_FILES")"
+assert_ok "stage_is_allowed (inpx-fb2) allows .inpx" \
+    stage_is_allowed inpx-fb2 "lib.inpx"
+assert_fail "stage_is_allowed (inpx-fb2) rejects .7z" \
+    stage_is_allowed inpx-fb2 "books.7z"
+assert_eq "stage_select_indexes (full) selects nothing (download all)" \
+    "" \
+    "$(stage_select_indexes monthly-fb2 <<< "$ARIA2_INPX_FILES")"
+
+# Staging state file (skip logic).
+STAGED_STATE_FILE="$TMPDIR_TEST/staged.tsv"
+stage_record dump "flibusta-dump-2026-08-01.torrent" "2026-08-01" \
+    "flibusta_gz" "lib.libbook.sql,lib.libavtor.sql" 2>/dev/null
+assert_ok "stage_is_done finds a recorded torrent" \
+    stage_is_done "flibusta-dump-2026-08-01.torrent" "$STAGED_STATE_FILE"
+assert_fail "stage_is_done misses an unrecorded torrent" \
+    stage_is_done "flibusta-inpx-fb2-2026-08-01.torrent" "$STAGED_STATE_FILE"
+assert_fail "stage_is_done returns false without a state file" \
+    stage_is_done "flibusta-dump-2026-08-01.torrent" "$TMPDIR_TEST/nonexistent-staged.tsv"
+
+# Collision handling (inpx overwrites; Latest keeps both).
+PLACE_DIR="$TMPDIR_TEST/stage-place"
+printf 'v1' > "$TMPDIR_TEST/a.inpx"
+stage_place inpx-fb2 "$TMPDIR_TEST/a.inpx" "$PLACE_DIR/inpx" 2>/dev/null
+printf 'v2' > "$TMPDIR_TEST/a.inpx"
+stage_place inpx-all "$TMPDIR_TEST/a.inpx" "$PLACE_DIR/inpx" 2>/dev/null
+assert_eq "stage_place overwrites an identical .inpx name" \
+    "v2" "$(cat "$PLACE_DIR/inpx/a.inpx")"
+
+printf 'fb2-zip' > "$TMPDIR_TEST/fb2.zip"
+printf 'usr-zip' > "$TMPDIR_TEST/usr.zip"
+stage_place monthly-fb2 "$TMPDIR_TEST/fb2.zip" "$PLACE_DIR/Latest" 2>/dev/null
+stage_place monthly-usr "$TMPDIR_TEST/usr.zip" "$PLACE_DIR/Latest" 2>/dev/null
+assert_ok "stage_place keeps both monthly archives in Latest" \
+    test -f "$PLACE_DIR/Latest/fb2.zip" -a -f "$PLACE_DIR/Latest/usr.zip"
+
+# =============================================================================
+# Staging CLI (bin/booktracker-stage.sh)
+# =============================================================================
+stage_rc="$(bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --help >/dev/null 2>&1; echo $?)"
+assert_eq "stage: --help exits 0" "0" "$stage_rc"
+
+stage_rc="$(env -u STAGING_DIR bash "$PROJECT_ROOT/bin/booktracker-stage.sh" >/dev/null 2>&1; echo $?)"
+assert_eq "stage: missing STAGING_DIR exits non-zero" "2" "$stage_rc"
+
+stage_rc="$(STAGING_DIR=/tmp bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --bogus >/dev/null 2>&1; echo $?)"
+assert_eq "stage: unknown option exits non-zero" "2" "$stage_rc"
+
+# Mock aria2c: --show-files lists an .inpx + a .7z; download "creates" the .inpx.
+MOCK_BIN="$TMPDIR_TEST/bin"
+mkdir -p "$MOCK_BIN"
+cat > "$MOCK_BIN/aria2c" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+    --show-files)
+        printf 'Files:\nidx|path/length\n===+===========\n  1|lib.inpx\n  2|books.7z\n'
+        ;;
+    *)
+        dir=""
+        for a in "$@"; do
+            [[ "$a" == --dir=* ]] && dir="${a#--dir=}"
+        done
+        mkdir -p "$dir"
+        printf 'inpx-data' > "$dir/lib.inpx"
+        ;;
+esac
+exit 0
+EOF
+chmod +x "$MOCK_BIN/aria2c"
+
+STAGE_DIR_TEST="$TMPDIR_TEST/staging"
+STAGE_ENV=(PATH="$MOCK_BIN:$PATH" STAGING_DIR="$STAGE_DIR_TEST" \
+    STAGED_STATE_FILE="$TMPDIR_TEST/staged-cli.tsv" \
+    TORRENT_DIR="$TMPDIR_TEST/torrents" ARCHIVE_DIR="$TMPDIR_TEST/stage-archive")
+
+# Dry run: builds the aria2c command with per-file selection.
+touch "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent"
+stage_out="$(env "${STAGE_ENV[@]}" \
+    bash "$PROJECT_ROOT/bin/booktracker-stage.sh" -n "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent" 2>&1)"
+stage_rc=$?
+assert_eq "stage: dry-run exits 0" "0" "$stage_rc"
+assert_eq "stage: dry-run builds an aria2c command" "1" \
+    "$(printf '%s' "$stage_out" | grep -c 'aria2c')"
+assert_eq "stage: dry-run selects only .inpx" "1" \
+    "$(printf '%s' "$stage_out" | grep -c -- '--select-file=1')"
+
+# Full run: download -> stage -> archive -> record, all via the mock.
+rm -f "$TMPDIR_TEST/staged-cli.tsv"
+touch "$TMPDIR_TEST/flibusta-inpx-fb2-2026-08-01.torrent"
+stage_out2="$(env "${STAGE_ENV[@]}" \
+    bash "$PROJECT_ROOT/bin/booktracker-stage.sh" "$TMPDIR_TEST/flibusta-inpx-fb2-2026-08-01.torrent" 2>&1)"
+stage_rc2=$?
+assert_eq "stage: full run exits 0" "0" "$stage_rc2"
+assert_ok "stage: .inpx staged into STAGING/inpx" \
+    test -f "$STAGE_DIR_TEST/inpx/lib.inpx"
+assert_eq "stage: staged file has the mock content" "inpx-data" \
+    "$(cat "$STAGE_DIR_TEST/inpx/lib.inpx")"
+assert_ok "stage: working dir archived" \
+    test -f "$TMPDIR_TEST/stage-archive/flibusta-inpx-fb2-2026-08-01/lib.inpx"
+assert_ok "stage: torrent recorded in staged state" \
+    grep -q "flibusta-inpx-fb2-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
 
 # --- Summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

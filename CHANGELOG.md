@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
 - Leveled logging (`log`, `log_info`, `log_warn`, `log_error`, `debug`).
 - Bash test suite (`tests/run_tests.sh`) covering the pure functions.
 - `.gitignore` rules to keep credentials and runtime data out of version control.
+- Staging of torrent contents (`bin/booktracker-stage.sh`):
+  - downloads `.torrent` payloads into a local `STAGING_DIR` with `aria2c`,
+  - selective download per type — `dump` fetches only the 12 `DUMP_ALLOWLIST`
+    tables and `inpx-fb2`/`inpx-all` fetch only `*.inpx`,
+  - decompresses dump `.gz` files to `.sql`,
+  - records results in `data/staged.tsv` (skip by default; `--force` re-runs).
+- Staging helper functions (`stage_type_from_name`, `stage_destination`,
+  `stage_is_allowed`, `stage_select_indexes`, `stage_is_done`, `stage_record`,
+  `stage_place`).
 
 ### Changed
 
