@@ -176,14 +176,19 @@ export STAGING_DIR=/path/to/staging
 | Type | Downloaded | Staged to |
 | --- | --- | --- |
 | `inpx-fb2` / `inpx-all` | `*.inpx` | `STAGING/inpx/` |
-| `dump` | the 12 `DUMP_ALLOWLIST` tables | `STAGING/flibusta_gz/` (decompressed to `.sql`) |
+| `dump` | the 12 `DUMP_ALLOWLIST` tables (`.gz`) | `STAGING/flibusta_gz/`, decompressed to `STAGING/flibusta/` |
 | `monthly-fb2` / `monthly-usr` | whole torrent | `STAGING/Latest/` |
 
 ```bash
-./bin/booktracker-stage.sh --dry-run   # print what would happen
-./bin/booktracker-stage.sh --force     # re-stage already-staged torrents
-./bin/booktracker-stage.sh --debug     # debug logging
+./bin/booktracker-stage.sh --dry-run     # print what would happen
+./bin/booktracker-stage.sh --force       # re-stage already-staged torrents
+./bin/booktracker-stage.sh --resume-only # skip torrents already fully downloaded
+./bin/booktracker-stage.sh --debug       # debug logging
 ```
+
+Releases can be tens of GB and take hours.  aria2c retries indefinitely and
+prints a progress summary every `ARIA2C_SUMMARY_INTERVAL` seconds; for
+unattended runs, wrap the command in `tmux`/`nohup`.
 
 ### Functions
 
@@ -215,8 +220,12 @@ Staging helpers live in `lib/booktracker-stage_functions.sh`:
 | `stage_destination` | Map a torrent type to its `STAGING_DIR` subfolder. |
 | `stage_is_allowed` | Decide whether a file belongs to a type's allowlist. |
 | `stage_select_indexes` | Convert an aria2c file listing into `--select-file` indexes. |
+| `stage_download_files` | Return the `idx|path` download set for a torrent type. |
+| `stage_total_size` | Sum the download set's byte sizes from an aria2c listing. |
+| `stage_human_size` | Format a byte count as human-readable (e.g. `7.0GiB`). |
+| `stage_bytes_from_human` | Convert an aria2c size like `99.9MiB` back to bytes. |
+| `stage_sql_destination` | Return the `flibusta` folder for decompressed dump `.sql`. |
 | `stage_is_done` / `stage_record` | Read / append the staging state file. |
-| `stage_place` | Copy a file into staging honoring collision rules. |
 
 ## Configuration
 
@@ -239,6 +248,10 @@ BOOKTRACKER_USERNAME=
 BOOKTRACKER_PASSWORD=
 EOF
 ```
+
+Set `BOOKTRACKER_NO_ENV=1` to ignore `.env` so explicitly-set environment
+variables take precedence (e.g. `STAGING_DIR=/elsewhere BOOKTRACKER_NO_ENV=1
+./bin/booktracker-stage.sh`).
 
 Key settings (all overridable via environment or `.env`):
 
@@ -263,7 +276,9 @@ Key settings (all overridable via environment or `.env`):
 | `STAGING_DIR` | *(none — required)* | Absolute path to the staging root (staging only). |
 | `DUMP_ALLOWLIST` | *(12 filenames)* | Dump files to download (staging only). |
 | `STAGED_STATE_FILE` | project `data/staged.tsv` | Staging state/history log (staging only). |
-| `ARIA2C_SEED_TIME` | `0` | Seconds to seed after download; `0` = stop (staging only). |
+| `ARIA2C_SEED_TIME` | `0` | Minutes to seed after download; `0` = stop (staging only). |
+| `ARIA2C_MAX_TRIES` | `0` | Download attempts; `0` = retry indefinitely (staging only). |
+| `ARIA2C_SUMMARY_INTERVAL` | `30` | aria2c progress-summary interval, in seconds (staging only). |
 
 Local paths, credentials, cookies, and other private information are not
 committed to the repository (see `.gitignore`).
@@ -328,15 +343,16 @@ files:
 1. **Select** — parse the torrent type from the filename, skip already-staged
    torrents (unless `--force`), and list the torrent's files with
    `aria2c --show-files`.
-2. **Download** — `aria2c --seed-time=0` fetches the payload into a working
-   directory, with `--select-file` restricting selective types to their
-   allowlist (`dump` → `DUMP_ALLOWLIST`, `inpx-*` → `*.inpx`).
-3. **Stage** — allowed files are moved into the `STAGING_DIR` subfolders
-   (`inpx/`, `Latest/`, `flibusta_gz/`); dump `.gz` files are decompressed to
-   `.sql`.
-4. **Archive & record** — the working directory is moved to `data/archive/`
-   and a row is appended to `data/staged.tsv`, so re-runs skip already-staged
-   torrents.
+2. **Download** — `aria2c` downloads the allowed files directly into the right
+   `STAGING_DIR` subfolder (`inpx/`, `Latest/`, `flibusta_gz/`), with
+   `--select-file` restricting selective types to their allowlist
+   (`dump` → `DUMP_ALLOWLIST`, `inpx-*` → `*.inpx`).  It logs the total size,
+   stops seeding immediately, retries indefinitely, and prints a progress
+   summary every `ARIA2C_SUMMARY_INTERVAL` seconds.
+3. **Decompress** — dump `.gz` files are decompressed to `.sql` into the
+   sibling `STAGING/flibusta/` folder; the raw `.gz` stay in `flibusta_gz/`.
+4. **Record** — a row is appended to `data/staged.tsv`, so re-runs skip
+   already-staged torrents.
 
 ## Torrent files & retention
 

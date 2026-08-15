@@ -35,24 +35,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
 - Bash test suite (`tests/run_tests.sh`) covering the pure functions.
 - `.gitignore` rules to keep credentials and runtime data out of version control.
 - Staging of torrent contents (`bin/booktracker-stage.sh`):
-  - downloads `.torrent` payloads into a local `STAGING_DIR` with `aria2c`,
+  - downloads `.torrent` payloads directly into a local `STAGING_DIR` with
+    `aria2c`,
   - selective download per type — `dump` fetches only the 12 `DUMP_ALLOWLIST`
     tables and `inpx-fb2`/`inpx-all` fetch only `*.inpx`,
-  - decompresses dump `.gz` files to `.sql`,
+  - decompresses dump `.gz` files to `.sql` into a sibling `flibusta/` folder,
   - records results in `data/staged.tsv` (skip by default; `--force` re-runs).
 - Staging helper functions (`stage_type_from_name`, `stage_destination`,
-  `stage_is_allowed`, `stage_select_indexes`, `stage_is_done`, `stage_record`,
-  `stage_place`).
+  `stage_sql_destination`, `stage_is_allowed`, `stage_download_files`,
+  `stage_select_indexes`, `stage_total_size`, `stage_human_size`,
+  `stage_bytes_from_human`, `stage_is_done`, `stage_record`).
 
 ### Changed
 
 - Replaced the hardcoded INPX/dump topic ids and the monthly forum id with
   live title-based discovery (`get_forumid` / `get_topicid`).
+- Staging now downloads payload files directly into `STAGING_DIR`, eliminating
+  the working directory, copy/move step, and archive step.
+- aria2c downloads now retry indefinitely (`ARIA2C_MAX_TRIES`), hash-check
+  existing files (`--check-integrity`), and print a progress summary every
+  `ARIA2C_SUMMARY_INTERVAL` seconds — keeping multi-GB, multi-hour releases
+  resilient and visible.
+- Selective downloads pin files flat with `--index-out` and use
+  `--file-allocation=none` + `--bt-remove-unselected-file` so large adjacent
+  archives (e.g. the dump's multi-GB `.zip`s) are neither preallocated nor
+  left behind.
+- Dump `.gz` files now decompress into a sibling `STAGING/flibusta/` folder,
+  keeping the raw `.gz` in `STAGING/flibusta_gz/`.
+- Added `--resume-only` to skip torrents whose files are already fully
+  downloaded, and the script now logs the total download size per torrent
+  before starting.
 
 ### Fixed
 
 - CLI options (`-f`, `-n`, `-d`) are now accepted after the command as well as
   before it (`all -f` no longer treats `-f` as the output directory).
+- `--dry-run` performs no filesystem side effects (it no longer creates the
+  staging directory).
+- The per-torrent download size is now parsed from aria2c's actual torrent
+  `--show-files` size lines (`   |91MiB (96,397,659)`), using the exact
+  parenthesized byte count, so the dry-run/start log shows a real total rather
+  than `0.0B`.
+- Added `BOOKTRACKER_NO_ENV=1` to skip the gitignored `.env` file, so
+  explicitly set environment variables take precedence (also keeps the test
+  suite isolated from a developer's real `.env`).
 - Updated the INPX topic search fragments to match the current release titles
   (the "расширенный"/"только FB2" wording was replaced by "…FLibrary + inpx"
   and "Дополнительные данные…").

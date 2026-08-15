@@ -1,7 +1,7 @@
 # Torrent Staging — Specification
 
 **Short name:** `torrent-staging`
-**Status:** Implemented (script + functions + tests; pending a live run)
+**Status:** Implemented (script + functions + tests; downloads directly into `STAGING_DIR`; pending a live run)
 **Date:** 2026-08-14
 
 ## 1. Overview
@@ -68,12 +68,13 @@ tables (`lib.a.annotations*.sql.gz`, `lib.b.annotations*.sql.gz`),
 | Dump payload | Dump torrent directly contains `*.gz` files; decompressed to `.sql` when staged. |
 | `inpx-all` `.7z` archives | **Not downloaded** — `inpx-all` downloads only its `.inpx` files. |
 | Monthly payloads | Both `.zip` archives are staged **as-is** (not unpacked). |
-| Layout | `STAGING/inpx/`, `STAGING/Latest/`, `STAGING/flibusta_gz/` (see §7). |
+| Layout | `STAGING/inpx/`, `STAGING/Latest/`, `STAGING/flibusta_gz/` + `STAGING/flibusta/` (decompressed dump; see §7). |
 | Trigger | **Manual command only** (no cron/auto-hook). |
 | Seeding | **Stop immediately** after download (aria2c `--seed-time=0`). |
 | Re-runs | **Skip by default**; `--force` re-processes. Tracked in a state file. |
+| Resume | `--resume-only` skips torrents whose files are already complete; aria2c `--check-integrity` resumes partial downloads. |
 | State | **New state file** `data/staged.tsv`. |
-| Cleanup | **Archive** leftover working-dir files (mostly aria2c logs/control files) to `data/archive/`. |
+| Cleanup | **Direct download** — payloads land straight in `STAGING_DIR`; no working directory or archive step. |
 | Verification | **Trust the client's piece hash-checking** (no extra checksum step). |
 | Tracker auth | Self-contained — the `.torrent` works as-is. |
 
@@ -101,9 +102,8 @@ downloads so there is a single engine.
 
 ### 4.2 Outputs
 
-- Allowed files copied into `STAGING_DIR` subfolders (see §7).
+- Allowed files downloaded directly into `STAGING_DIR` subfolders (see §7).
 - A `data/staged.tsv` row for each successfully staged torrent.
-- The raw download working directory moved to `data/archive/`.
 
 ### 4.3 Non-goals
 
@@ -123,7 +123,9 @@ downloads so there is a single engine.
 | `STATE_FILE` | `data/downloads.tsv` | Existing download state (unchanged). |
 | `STAGED_STATE_FILE` | `data/staged.tsv` | New: records staged torrents. |
 | `LOG_LEVEL` | `info` | Reuse existing logging. |
-| `ARIA2C_SEED_TIME` | `0` | Seconds to seed; `0` = stop immediately. |
+| `ARIA2C_SEED_TIME` | `0` | Minutes to seed; `0` = stop immediately. |
+| `ARIA2C_MAX_TRIES` | `0` | Download attempts; `0` = retry indefinitely. |
+| `ARIA2C_SUMMARY_INTERVAL` | `30` | aria2c progress-summary interval (seconds). |
 | `DUMP_ALLOWLIST` | *(12 filenames)* | Explicit files to download from the `dump` torrent. |
 
 The per-type allowlist is the only hard-coded rule for now and lives in the
@@ -145,10 +147,11 @@ Usage: booktracker-stage.sh [options] [torrent-file...]
 With no arguments, process every un-staged .torrent in TORRENT_DIR.
 
 Options:
-  -f, --force     Re-stage even if already recorded in data/staged.tsv
-  -n, --dry-run   Print what would happen without downloading
-  -d, --debug     Enable debug logging
-  -h, --help      Show this help
+  -f, --force       Re-stage even if already recorded in data/staged.tsv
+  -n, --dry-run     Print what would happen without downloading
+      --resume-only  Skip torrents whose files are already fully downloaded
+  -d, --debug       Enable debug logging
+  -h, --help        Show this help
 
 Environment:
   STAGING_DIR     (required) absolute path to the staging root
@@ -159,12 +162,12 @@ Environment:
 ### 7.1 `inpx-fb2` → `STAGING/inpx/`
 
 - **Selective**: download only `.inpx` files (`aria2c --select-file`).
-- Stage the `.inpx` files into `STAGING/inpx/`.
+- Download the `.inpx` files directly into `STAGING/inpx/`.
 
 ### 7.2 `inpx-all` → `STAGING/inpx/`
 
 - **Selective**: download only `.inpx` files (`aria2c --select-file`).
-- Stage the `.inpx` files into `STAGING/inpx/`.
+- Download the `.inpx` files directly into `STAGING/inpx/`.
 - The `.7z` book archives are **not downloaded** at all.
 
 ### 7.3 `dump` → `STAGING/flibusta_gz/`
@@ -174,19 +177,17 @@ Environment:
   `aria2c --select-file=<indices>`.
 - Everything else is **never downloaded** — the `.zip` attached archives, the
   annotations tables, `lib.md5.txt.gz`, and `lib.reviews.sql.gz`.
-- Decompress each `.gz` to `.sql` (e.g. `gzip -dk`), then stage the `.sql`
-  files into `STAGING/flibusta_gz/`. (The folder keeps the user-chosen
-  `flibusta_gz` name even though it now holds `.sql` files.)
+- Download the allowed `.gz` files directly into `STAGING/flibusta_gz/`, then
+  decompress each to `.sql` into the sibling `STAGING/flibusta/` folder
+  (keeping the raw `.gz` in `flibusta_gz/`).
 
 ### 7.4 `monthly-fb2` → `STAGING/Latest/`
 
-- Full download.
-- Stage the `.zip` archive(s) into `STAGING/Latest/` as-is.
+- Full download, directly into `STAGING/Latest/`.
 
 ### 7.5 `monthly-usr` → `STAGING/Latest/`
 
-- Full download.
-- Stage the `.zip` archive(s) into `STAGING/Latest/` as-is (distinct names from
+- Full download, directly into `STAGING/Latest/` (distinct names from
   `monthly-fb2`).
 
 ### Collision rules
@@ -194,6 +195,8 @@ Environment:
 - `STAGING/inpx/`: both `inpx-fb2` and `inpx-all` may drop `.inpx` files there;
   **keep both, overwrite on identical filename**.
 - `STAGING/Latest/`: both monthly archives coexist; **keep names** (they differ).
+- `STAGING/flibusta_gz/` + `STAGING/flibusta/`: a new dump overwrites the
+  previous dump's same-named files (latest dump wins).
 
 ## 8. Processing flow (per torrent)
 
@@ -204,14 +207,16 @@ Environment:
    - `dump`: indices of files whose names are in `DUMP_ALLOWLIST`.
    - `inpx-fb2`/`inpx-all`: indices of files whose names match `*.inpx`.
    - others: all files.
-5. Download into a working dir (e.g. `data/torrents/work/<name>/`) using
-   `aria2c --seed-time=0` (+ `--select-file` for `dump` and `inpx-all`).
-6. For `dump`, decompress `.gz` → `.sql` (gzip); then move the allowed files
-   into the appropriate `STAGING_DIR` subfolder.
-7. Archive the working dir to `data/archive/`.
-8. Append a row to `data/staged.tsv`
+5. Download the allowed files **directly into** the appropriate `STAGING_DIR`
+   subfolder using `aria2c --seed-time=0 --dir=<dest_dir>` (+ `--select-file`,
+   `--index-out`, `--file-allocation=none`, `--bt-remove-unselected-file` for
+   selective types).
+6. For `dump`, decompress each `.gz` → `.sql` into the sibling
+   `STAGING/flibusta/` folder (`gzip -dc`), keeping the raw `.gz` in
+   `flibusta_gz/`.
+7. Append a row to `data/staged.tsv`
    (`staged_at`, `type`, `torrent`, `stamp`, `destination`, `files`).
-9. Log the outcome (reuse `log`/`log_info`/`log_warn`/`log_error`).
+8. Log the outcome (reuse `log`/`log_info`/`log_warn`/`log_error`).
 
 ## 9. Error handling & edge cases
 
@@ -219,12 +224,12 @@ Environment:
 - **Unknown/corrupt `.torrent`** → log error, skip that file, continue others.
 - **No seeders / stall** → rely on aria2c retry/timeout; log failure; do not
   record in `staged.tsv` so a later run retries.
-- **Partial download** → aria2c resume via its `.aria2` control file if the
-  working dir still exists; otherwise re-download.
+- **Partial download** → aria2c resumes via its `.aria2` control file left in
+  the destination directory; otherwise re-download.
 - **Collision** → per §7 collision rules (overwrite in `STAGING/inpx`, keep
   both in `STAGING/Latest`).
-- **Disk full / move failure** → log error, leave working dir in place for
-  manual recovery, do not mark staged.
+- **Disk full / decompress failure** → log error, leave the partial files in
+  place for manual recovery, do not mark staged.
 - **Dry run** → print the aria2c command + destination without downloading.
 
 ## 10. Resolved decisions
@@ -235,7 +240,7 @@ Environment:
 | OQ-2 | `inpx-all` is **selective**: download only `.inpx`, skip the `.7z` books. |
 | OQ-3 | Monthly `.zip` archives are kept **as `.zip`** (not unpacked). |
 | OQ-4 | Dump `.gz` files are **decompressed to `.sql`** before staging. |
-| OQ-5 | Archive the leftover working-dir files (mostly aria2c logs/control files) to `data/archive/`. |
+| OQ-5 | Download directly into `STAGING_DIR` — no working directory or archive step. |
 | OQ-6 | `aria2c` is already installed; if it is ever missing, error out with an install hint (no auto-install). |
 
 ## 11. Testing plan (no network required where possible)
@@ -245,9 +250,9 @@ Environment:
   - `dump` file-list → allowlist index selection (mock `aria2c --show-files` output).
   - destination mapping per type.
   - state-file skip vs `--force`.
-  - collision handling (inpx overwrite vs Latest keep-both).
+  - download-set selection (`stage_download_files` / `stage_select_indexes`).
 - CLI arg parsing tests (options before/after args, like the existing suite).
-- A dry-run test that only prints commands.
+- A dry-run test that only prints commands and performs no filesystem side effects.
 
 ## 12. Out of scope (explicit)
 

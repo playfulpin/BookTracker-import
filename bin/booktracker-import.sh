@@ -17,7 +17,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$PROJECT_ROOT/config/config.sh"
 
 # Load optional gitignored .env (credentials / overrides), if present.
-if [[ -f "$PROJECT_ROOT/.env" ]]; then
+# BOOKTRACKER_NO_ENV=1 skips it so explicitly-set environment variables win.
+if [[ -f "$PROJECT_ROOT/.env" && "${BOOKTRACKER_NO_ENV:-0}" != 1 ]]; then
     set -a
     # shellcheck source=/dev/null
     source "$PROJECT_ROOT/.env"

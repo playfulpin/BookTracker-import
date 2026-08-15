@@ -81,6 +81,13 @@ VERIFY_TORRENT="${VERIFY_TORRENT:-1}" # 1 = validate downloaded torrents
 export DRY_RUN VERIFY_TORRENT
 
 # --- Staging ----------------------------------------------------------------
+# aria2c download options.  Releases can be tens of GB and take hours, so
+# downloads retry indefinitely and print a progress summary periodically.
+ARIA2C_SEED_TIME="${ARIA2C_SEED_TIME:-0}"                   # minutes to seed after download (0 = stop)
+ARIA2C_MAX_TRIES="${ARIA2C_MAX_TRIES:-0}"                   # download attempts (0 = retry forever)
+ARIA2C_SUMMARY_INTERVAL="${ARIA2C_SUMMARY_INTERVAL:-30}"    # aria2c progress-summary interval (seconds)
+export ARIA2C_SEED_TIME ARIA2C_MAX_TRIES ARIA2C_SUMMARY_INTERVAL
+
 # Which files to download from the database dump torrent.  Only these core
 # library tables are fetched; the .zip attached archives, the annotations
 # tables, lib.md5.txt.gz, and lib.reviews.sql.gz are skipped.

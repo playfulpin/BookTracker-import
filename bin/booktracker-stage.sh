@@ -3,10 +3,11 @@
 # booktracker-stage — main executable
 #
 # Downloads the contents of the .torrent files produced by
-# bin/booktracker-import.sh into a local STAGING_DIR using aria2c, extracting
-# only the allowed files for selective torrent types (dump, inpx-*).  Pure
-# logic lives in lib/booktracker-stage_functions.sh; this script orchestrates
-# discovery, download, staging, archiving, and state tracking.
+# bin/booktracker-import.sh directly into a local STAGING_DIR using aria2c,
+# fetching only the allowed files for selective torrent types (dump, inpx-*).
+# Dump .gz files are decompressed into a sibling "flibusta" folder.  Pure logic
+# lives in lib/booktracker-stage_functions.sh; this script orchestrates
+# discovery, download, in-place decompression, and state tracking.
 # =============================================================================
 
 set -u
@@ -19,7 +20,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$PROJECT_ROOT/config/config.sh"
 
 # Load optional gitignored .env (credentials / overrides), if present.
-if [[ -f "$PROJECT_ROOT/.env" ]]; then
+# BOOKTRACKER_NO_ENV=1 skips it so explicitly-set environment variables win.
+if [[ -f "$PROJECT_ROOT/.env" && "${BOOKTRACKER_NO_ENV:-0}" != 1 ]]; then
     set -a
     # shellcheck source=/dev/null
     source "$PROJECT_ROOT/.env"
@@ -41,10 +43,11 @@ using aria2c.  With no arguments, every un-staged .torrent in TORRENT_DIR is
 processed.
 
 Options:
-  -f, --force     Re-stage even if already recorded in data/staged.tsv
-  -n, --dry-run   Print what would happen without downloading
-  -d, --debug     Enable debug logging
-  -h, --help      Show this help
+  -f, --force       Re-stage even if already recorded in data/staged.tsv
+  -n, --dry-run     Print what would happen without downloading
+      --resume-only  Skip torrents whose files are already fully downloaded
+  -d, --debug       Enable debug logging
+  -h, --help        Show this help
 
 Environment:
   STAGING_DIR     (required) absolute path to the staging root
@@ -52,12 +55,14 @@ EOF
 }
 
 # stage_one <torrent_file>
-# Download one torrent's allowed files into a working dir, move them into the
-# right STAGING_DIR subfolder, archive the working dir, and record the result.
-# Returns 0 on success, 1 on failure.
+# Download one torrent's allowed files directly into the right STAGING_DIR
+# subfolder (no intermediate working directory), decompress dump .gz files into
+# the sibling "flibusta" folder, and record the result.  Returns 0 on success,
+# 1 on failure.
 stage_one() {
-    local torrent_file="$1" name type dest dest_dir work select files_list stamp
-    local f base dst files_csv="" n=0
+    local torrent_file="$1" name type dest dest_dir sql_dir select files_list
+    local entry idx path base dst record_dest files_csv="" n=0 total_size=0
+    local -a download_files=()
 
     name="$(basename "$torrent_file")"
     type="$(stage_type_from_name "$name")" || {
@@ -72,96 +77,123 @@ stage_one() {
 
     dest="$(stage_destination "$type")" || { log_error "no destination for type '$type'"; return 1; }
     dest_dir="$STAGING_DIR/$dest"
+    # dump downloads its .gz into flibusta_gz and decompresses into the sibling
+    # "flibusta" folder.
+    sql_dir=""
+    [[ "$type" == dump ]] && sql_dir="$STAGING_DIR/$(stage_sql_destination)"
 
     stamp="${name#"${TORRENT_NAME_PREFIX}-${type}-"}"
     stamp="${stamp%.torrent}"
 
-    work="$TORRENT_DIR/work/${name%.torrent}"
-    mkdir -p "$work" || { log_error "cannot create working dir: $work"; return 1; }
+    # List the torrent's files and compute the download set + total size.
+    files_list="$(aria2c --show-files "$torrent_file" 2>/dev/null)" || {
+        log_error "aria2c --show-files failed: $name"
+        return 1
+    }
+    # aria2c may emit CRLF on Windows; normalize so parsing is portable.
+    files_list="${files_list//$'\r'/}"
+    while IFS='|' read -r idx path; do
+        download_files+=("$idx|$path")
+    done < <(stage_download_files "$type" <<< "$files_list")
 
-    # Determine the aria2c --select-file set for selective types.
-    select=""
+    if (( ${#download_files[@]} == 0 )); then
+        log_warn "no files to download in $name; skipping"
+        return 1
+    fi
+
+    total_size="$(stage_total_size "$type" <<< "$files_list")"
+
+    # Expected output names (dump: decompressed .sql).
+    for entry in "${download_files[@]}"; do
+        path="${entry#*|}"
+        base="$(basename "$path")"
+        [[ "$type" == dump ]] && base="${base%.gz}"
+        files_csv="${files_csv:+$files_csv,}$base"
+        n=$((n + 1))
+    done
+
+    # The record's destination: dump's .sql land in "flibusta", everything else
+    # lands in its download directory.
+    record_dest="$dest"
+    [[ "$type" == dump ]] && record_dest="$(stage_sql_destination)"
+
+    # --resume-only: skip torrents whose download already completed (every file
+    # present and no leftover .aria2 control file).
+    if (( RESUME_ONLY )); then
+        local ctrl has_control=0 all_present=1
+        for ctrl in "$dest_dir"/*.aria2; do
+            [[ -e "$ctrl" ]] && { has_control=1; break; }
+        done
+        for entry in "${download_files[@]}"; do
+            path="${entry#*|}"
+            [[ -s "$dest_dir/$(basename "$path")" ]] || { all_present=0; break; }
+        done
+        if (( all_present )) && (( ! has_control )); then
+            log_info "already present: $name (--resume-only, skipping)"
+            return 0
+        fi
+    fi
+
+    # Build the aria2c command.  Files download directly into the destination
+    # directory, so there is no copy/move step afterwards.  Large releases can
+    # be tens of GB and take hours, so aria2c retries indefinitely and prints a
+    # progress summary every ARIA2C_SUMMARY_INTERVAL seconds.
+    local -a aria_args=(
+        --seed-time="${ARIA2C_SEED_TIME}"
+        --max-tries="${ARIA2C_MAX_TRIES}"
+        --summary-interval="${ARIA2C_SUMMARY_INTERVAL}"
+        --check-integrity=true
+        --dir="$dest_dir"
+    )
     case "$type" in
         dump|inpx-fb2|inpx-all)
-            files_list="$(aria2c --show-files "$torrent_file" 2>/dev/null)" || {
-                log_error "aria2c --show-files failed: $name"
-                return 1
-            }
             select="$(stage_select_indexes "$type" <<< "$files_list")"
-            if [[ -z "$select" ]]; then
-                log_warn "no allowed files found in $name; skipping"
-                return 1
-            fi
+            # Pin each selected file to its basename (flat under dest_dir) and
+            # avoid preallocating the large adjacent unselected files that
+            # share a piece boundary (e.g. the dump's multi-GB .zip archives).
+            aria_args+=(--select-file="$select" --bt-remove-unselected-file=true --file-allocation=none)
+            for entry in "${download_files[@]}"; do
+                idx="${entry%%|*}"
+                path="${entry#*|}"
+                aria_args+=(--index-out="$idx=$(basename "$path")")
+            done
             ;;
     esac
 
-    # Download (or print the command in dry-run).
-    local -a aria_args=(--seed-time="${ARIA2C_SEED_TIME}" --dir="$work")
-    [[ -n "$select" ]] && aria_args+=(--select-file="$select")
     if (( DRY_RUN )); then
         log_info "[dry-run] would run: aria2c ${aria_args[*]} $torrent_file"
-    elif ! aria2c "${aria_args[@]}" "$torrent_file"; then
+        log_info "[dry-run] would download $n file(s), $(stage_human_size "$total_size") total"
+        log_info "[dry-run] would record: $type $name stamp=$stamp dest=$record_dest files=$files_csv"
+        return 0
+    fi
+
+    mkdir -p "$dest_dir" || { log_error "cannot create staging dir: $dest_dir"; return 1; }
+    log_info "downloading $name ($n file(s), $(stage_human_size "$total_size")) into $dest_dir (may take a long time)"
+    if ! aria2c "${aria_args[@]}" "$torrent_file"; then
         log_error "aria2c download failed: $name"
         return 1
     fi
 
-    # Stage the allowed files.
-    if (( DRY_RUN )); then
-        log_info "[dry-run] would stage allowed files into $dest_dir"
-    else
-        mkdir -p "$dest_dir" || { log_error "cannot create staging dir: $dest_dir"; return 1; }
-        case "$type" in
-            dump)
-                while IFS= read -r -d '' f; do
-                    [[ "$f" == *.gz ]] || continue
-                    base="${f##*/}"
-                    dst="${base%.gz}"
-                    if gzip -dkc "$f" > "$dest_dir/$dst"; then
-                        log_info "staged: $dest_dir/$dst"
-                    else
-                        log_error "failed to decompress $f"
-                        return 1
-                    fi
-                    files_csv="${files_csv:+$files_csv,}$dst"
-                    n=$((n + 1))
-                done < <(find "$work" -type f -print0)
-                ;;
-            *)
-                while IFS= read -r -d '' f; do
-                    base="${f##*/}"
-                    if stage_place "$type" "$f" "$dest_dir"; then
-                        log_info "staged: $dest_dir/$base"
-                    else
-                        log_error "failed to stage $f"
-                        return 1
-                    fi
-                    files_csv="${files_csv:+$files_csv,}$base"
-                    n=$((n + 1))
-                done < <(find "$work" -type f -print0)
-                ;;
-        esac
-        (( n > 0 )) || log_warn "no files staged from $name"
+    # Decompress dump .gz files into the sibling "flibusta" folder, keeping the
+    # raw .gz in flibusta_gz.
+    if [[ "$type" == dump ]]; then
+        mkdir -p "$sql_dir" || { log_error "cannot create decompress dir: $sql_dir"; return 1; }
+        for entry in "${download_files[@]}"; do
+            path="${entry#*|}"
+            base="$(basename "$path")"
+            src="$dest_dir/$base"
+            dst="$sql_dir/${base%.gz}"
+            if gzip -dc "$src" > "$dst"; then
+                log_info "decompressed: $dst"
+            else
+                log_error "failed to decompress $src"
+                return 1
+            fi
+        done
     fi
 
-    # Archive the working dir.
-    if (( DRY_RUN )); then
-        log_info "[dry-run] would archive $work -> $ARCHIVE_DIR/$(basename "$work")"
-    else
-        mkdir -p "$ARCHIVE_DIR" 2>/dev/null || true
-        if mv "$work" "$ARCHIVE_DIR/$(basename "$work")"; then
-            log_info "archived working dir: $work"
-        else
-            log_warn "failed to archive $work"
-        fi
-    fi
-
-    # Record the result.
-    if (( DRY_RUN )); then
-        log_info "[dry-run] would record: $type $name stamp=$stamp dest=$dest files=${files_csv:-<none>}"
-    else
-        stage_record "$type" "$name" "$stamp" "$dest" "$files_csv"
-    fi
-
+    stage_record "$type" "$name" "$stamp" "$record_dest" "$files_csv"
+    log_info "staged $name: $files_csv -> $STAGING_DIR/$record_dest"
     return 0
 }
 
@@ -170,6 +202,7 @@ main() {
     local -a torrents=()
     DRY_RUN="${DRY_RUN:-0}"
     FORCE="${FORCE:-0}"
+    RESUME_ONLY="${RESUME_ONLY:-0}"
 
     while (( $# )); do
         arg="$1"
@@ -186,6 +219,9 @@ main() {
                 ;;
             -f|--force)
                 FORCE=1
+                ;;
+            --resume-only)
+                RESUME_ONLY=1
                 ;;
             -*)
                 log_error "unknown option: $arg"

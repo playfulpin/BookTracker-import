@@ -409,6 +409,79 @@ assert_eq "stage_select_indexes (full) selects nothing (download all)" \
     "" \
     "$(stage_select_indexes monthly-fb2 <<< "$ARIA2_INPX_FILES")"
 
+# stage_download_files returns the download set as idx|path lines.
+assert_eq "stage_download_files (dump) lists only allowed files" \
+    "7|lib.libavtor.sql.gz
+8|lib.libavtorname.sql.gz
+9|lib.libbook.sql.gz
+10|lib.libfilename.sql.gz
+11|lib.libgenre.sql.gz
+12|lib.libgenrelist.sql.gz
+13|lib.libjoinedbooks.sql.gz
+14|lib.librate.sql.gz
+15|lib.librecs.sql.gz
+16|lib.libseq.sql.gz
+17|lib.libseqname.sql.gz
+18|lib.libtranslator.sql.gz" \
+    "$(stage_download_files dump <<< "$ARIA2_DUMP_FILES")"
+assert_eq "stage_download_files (inpx-fb2) lists only the .inpx" \
+    "1|lib.inpx" \
+    "$(stage_download_files inpx-fb2 <<< "$ARIA2_INPX_FILES")"
+assert_eq "stage_download_files (full) lists every file" \
+    "1|lib.inpx
+2|books.fb2.7z
+3|books.epub.7z" \
+    "$(stage_download_files monthly-fb2 <<< "$ARIA2_INPX_FILES")"
+
+# stage_sql_destination + size helpers.
+assert_eq "stage_sql_destination returns the decompress folder" \
+    "flibusta" \
+    "$(stage_sql_destination)"
+
+ARIA2_SIZED_FILES='Files:
+idx|path/length
+===+===========
+  1|./lib.inpx
+   |100B (100)
+  2|./books.fb2.7z
+   |300B (300)
+  3|./books.epub.7z
+   |5.0KiB (5,120)'
+
+assert_eq "stage_total_size (inpx-fb2) sums only allowed files" \
+    "100" \
+    "$(stage_total_size inpx-fb2 <<< "$ARIA2_SIZED_FILES")"
+assert_eq "stage_total_size (full) sums every file" \
+    "5520" \
+    "$(stage_total_size monthly-fb2 <<< "$ARIA2_SIZED_FILES")"
+assert_eq "stage_total_size uses exact parenthesized bytes" \
+    "96397659" \
+    "$(stage_total_size inpx-fb2 <<< 'idx|path/length
+===+===========
+  1|./lib.inpx
+   |91MiB (96,397,659)')"
+assert_eq "stage_bytes_from_human converts bytes" \
+    "100" \
+    "$(stage_bytes_from_human '100B')"
+assert_eq "stage_bytes_from_human converts KiB" \
+    "5120" \
+    "$(stage_bytes_from_human '5.0KiB')"
+assert_eq "stage_bytes_from_human converts MiB" \
+    "1048576" \
+    "$(stage_bytes_from_human '1.0MiB')"
+assert_eq "stage_bytes_from_human converts GiB" \
+    "1073741824" \
+    "$(stage_bytes_from_human '1.0GiB')"
+assert_eq "stage_bytes_from_human returns 0 for junk" \
+    "0" \
+    "$(stage_bytes_from_human 'nope')"
+assert_eq "stage_human_size formats bytes" \
+    "1.0KiB" \
+    "$(stage_human_size 1024)"
+assert_eq "stage_human_size formats a large value" \
+    "129.5MiB" \
+    "$(stage_human_size 135805014)"
+
 # Staging state file (skip logic).
 STAGED_STATE_FILE="$TMPDIR_TEST/staged.tsv"
 stage_record dump "flibusta-dump-2026-08-01.torrent" "2026-08-01" \
@@ -420,58 +493,72 @@ assert_fail "stage_is_done misses an unrecorded torrent" \
 assert_fail "stage_is_done returns false without a state file" \
     stage_is_done "flibusta-dump-2026-08-01.torrent" "$TMPDIR_TEST/nonexistent-staged.tsv"
 
-# Collision handling (inpx overwrites; Latest keeps both).
-PLACE_DIR="$TMPDIR_TEST/stage-place"
-printf 'v1' > "$TMPDIR_TEST/a.inpx"
-stage_place inpx-fb2 "$TMPDIR_TEST/a.inpx" "$PLACE_DIR/inpx" 2>/dev/null
-printf 'v2' > "$TMPDIR_TEST/a.inpx"
-stage_place inpx-all "$TMPDIR_TEST/a.inpx" "$PLACE_DIR/inpx" 2>/dev/null
-assert_eq "stage_place overwrites an identical .inpx name" \
-    "v2" "$(cat "$PLACE_DIR/inpx/a.inpx")"
-
-printf 'fb2-zip' > "$TMPDIR_TEST/fb2.zip"
-printf 'usr-zip' > "$TMPDIR_TEST/usr.zip"
-stage_place monthly-fb2 "$TMPDIR_TEST/fb2.zip" "$PLACE_DIR/Latest" 2>/dev/null
-stage_place monthly-usr "$TMPDIR_TEST/usr.zip" "$PLACE_DIR/Latest" 2>/dev/null
-assert_ok "stage_place keeps both monthly archives in Latest" \
-    test -f "$PLACE_DIR/Latest/fb2.zip" -a -f "$PLACE_DIR/Latest/usr.zip"
-
 # =============================================================================
 # Staging CLI (bin/booktracker-stage.sh)
 # =============================================================================
 stage_rc="$(bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --help >/dev/null 2>&1; echo $?)"
 assert_eq "stage: --help exits 0" "0" "$stage_rc"
 
-stage_rc="$(env -u STAGING_DIR bash "$PROJECT_ROOT/bin/booktracker-stage.sh" >/dev/null 2>&1; echo $?)"
+stage_rc="$(env -u STAGING_DIR BOOKTRACKER_NO_ENV=1 bash "$PROJECT_ROOT/bin/booktracker-stage.sh" >/dev/null 2>&1; echo $?)"
 assert_eq "stage: missing STAGING_DIR exits non-zero" "2" "$stage_rc"
 
 stage_rc="$(STAGING_DIR=/tmp bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --bogus >/dev/null 2>&1; echo $?)"
 assert_eq "stage: unknown option exits non-zero" "2" "$stage_rc"
 
-# Mock aria2c: --show-files lists an .inpx + a .7z; download "creates" the .inpx.
+# Mock aria2c: --show-files lists files (with sizes) per torrent type; download
+# "creates" the selected files via --index-out.  A mock gzip decompresses.
 MOCK_BIN="$TMPDIR_TEST/bin"
 mkdir -p "$MOCK_BIN"
 cat > "$MOCK_BIN/aria2c" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
     --show-files)
-        printf 'Files:\nidx|path/length\n===+===========\n  1|lib.inpx\n  2|books.7z\n'
+        case "$2" in
+            *dump*)
+                printf 'Files:\nidx|path/length\n===+===========\n  1|lib.libbook.sql.gz\n   |100B (100)\n  2|lib.a.attached.zip\n   |999B (999)\n'
+                ;;
+            *)
+                printf 'Files:\nidx|path/length\n===+===========\n  1|lib.inpx\n   |121KiB (123,904)\n  2|books.7z\n   |639KiB (654,336)\n'
+                ;;
+        esac
         ;;
     *)
         dir=""
+        declare -a outs=()
         for a in "$@"; do
-            [[ "$a" == --dir=* ]] && dir="${a#--dir=}"
+            case "$a" in
+                --dir=*) dir="${a#--dir=}" ;;
+                --index-out=*)
+                    spec="${a#--index-out=}"
+                    outs+=("${spec#*=}")
+                    ;;
+            esac
         done
         mkdir -p "$dir"
-        printf 'inpx-data' > "$dir/lib.inpx"
+        for name in "${outs[@]}"; do
+            if [[ "$name" == *.gz ]]; then
+                printf 'gzip-data' > "$dir/$name"
+            else
+                printf 'inpx-data' > "$dir/$name"
+            fi
+        done
         ;;
 esac
 exit 0
 EOF
 chmod +x "$MOCK_BIN/aria2c"
 
+cat > "$MOCK_BIN/gzip" <<'EOF'
+#!/usr/bin/env bash
+# Mock decompressor: `-dc <file>` prints fixed decompressed content to stdout.
+printf 'sql-data'
+exit 0
+EOF
+chmod +x "$MOCK_BIN/gzip"
+
 STAGE_DIR_TEST="$TMPDIR_TEST/staging"
 STAGE_ENV=(PATH="$MOCK_BIN:$PATH" STAGING_DIR="$STAGE_DIR_TEST" \
+    BOOKTRACKER_NO_ENV=1 \
     STAGED_STATE_FILE="$TMPDIR_TEST/staged-cli.tsv" \
     TORRENT_DIR="$TMPDIR_TEST/torrents" ARCHIVE_DIR="$TMPDIR_TEST/stage-archive")
 
@@ -485,22 +572,56 @@ assert_eq "stage: dry-run builds an aria2c command" "1" \
     "$(printf '%s' "$stage_out" | grep -c 'aria2c')"
 assert_eq "stage: dry-run selects only .inpx" "1" \
     "$(printf '%s' "$stage_out" | grep -c -- '--select-file=1')"
+assert_eq "stage: dry-run pins the .inpx to its basename" "1" \
+    "$(printf '%s' "$stage_out" | grep -c -- '--index-out=1=lib.inpx')"
+assert_eq "stage: dry-run shows the staged file name" "1" \
+    "$(printf '%s' "$stage_out" | grep -c 'files=lib.inpx')"
+assert_eq "stage: dry-run shows the total download size" "1" \
+    "$(printf '%s' "$stage_out" | grep -c 'total')"
+assert_fail "stage: dry-run does not create the staging directory" \
+    test -e "$STAGE_DIR_TEST"
 
-# Full run: download -> stage -> archive -> record, all via the mock.
+# Full run: download directly into staging -> record, all via the mock.
 rm -f "$TMPDIR_TEST/staged-cli.tsv"
 touch "$TMPDIR_TEST/flibusta-inpx-fb2-2026-08-01.torrent"
 stage_out2="$(env "${STAGE_ENV[@]}" \
     bash "$PROJECT_ROOT/bin/booktracker-stage.sh" "$TMPDIR_TEST/flibusta-inpx-fb2-2026-08-01.torrent" 2>&1)"
 stage_rc2=$?
 assert_eq "stage: full run exits 0" "0" "$stage_rc2"
-assert_ok "stage: .inpx staged into STAGING/inpx" \
+assert_ok "stage: .inpx downloaded directly into STAGING/inpx" \
     test -f "$STAGE_DIR_TEST/inpx/lib.inpx"
 assert_eq "stage: staged file has the mock content" "inpx-data" \
     "$(cat "$STAGE_DIR_TEST/inpx/lib.inpx")"
-assert_ok "stage: working dir archived" \
-    test -f "$TMPDIR_TEST/stage-archive/flibusta-inpx-fb2-2026-08-01/lib.inpx"
+assert_fail "stage: no intermediate work/archive directory is created" \
+    test -e "$TMPDIR_TEST/stage-archive"
 assert_ok "stage: torrent recorded in staged state" \
     grep -q "flibusta-inpx-fb2-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
+
+# Dump: .gz downloads into flibusta_gz/ and decompresses into the sibling
+# flibusta/ folder (keeping the raw .gz).
+rm -f "$TMPDIR_TEST/staged-cli.tsv"
+touch "$TMPDIR_TEST/flibusta-dump-2026-08-01.torrent"
+stage_out4="$(env "${STAGE_ENV[@]}" \
+    bash "$PROJECT_ROOT/bin/booktracker-stage.sh" "$TMPDIR_TEST/flibusta-dump-2026-08-01.torrent" 2>&1)"
+stage_rc4=$?
+assert_eq "stage: dump run exits 0" "0" "$stage_rc4"
+assert_ok "stage: dump .gz downloaded into flibusta_gz" \
+    test -f "$STAGE_DIR_TEST/flibusta_gz/lib.libbook.sql.gz"
+assert_ok "stage: dump .sql decompressed into flibusta" \
+    test -f "$STAGE_DIR_TEST/flibusta/lib.libbook.sql"
+assert_eq "stage: dump .sql has decompressed content" "sql-data" \
+    "$(cat "$STAGE_DIR_TEST/flibusta/lib.libbook.sql")"
+assert_ok "stage: dump torrent recorded" \
+    grep -q "flibusta-dump-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
+
+# --resume-only: skip a torrent whose output file already exists (unrecorded).
+touch "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent"
+stage_out5="$(env "${STAGE_ENV[@]}" \
+    bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --resume-only "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent" 2>&1)"
+stage_rc5=$?
+assert_eq "stage: --resume-only skips an already-present torrent" "0" "$stage_rc5"
+assert_eq "stage: --resume-only logs the skip" "1" \
+    "$(printf '%s' "$stage_out5" | grep -c 'already present')"
 
 # --- Summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

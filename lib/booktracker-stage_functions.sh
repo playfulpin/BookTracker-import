@@ -6,10 +6,11 @@
 # by booktracker-import.sh into staged payload files under STAGING_DIR.
 # Sourced by the staging CLI (bin/booktracker-stage.sh) and by the test suite.
 #
-#   naming        stage_type_from_name, stage_destination
-#   selection     stage_is_allowed, stage_select_indexes
+#   naming        stage_type_from_name, stage_destination, stage_sql_destination
+#   selection     stage_is_allowed, stage_download_files, stage_select_indexes,
+#                 stage_total_size
+#   formatting    stage_human_size, stage_bytes_from_human
 #   state         stage_is_done, stage_record
-#   placement     stage_place
 #
 # Requires: bash >= 4
 # =============================================================================
@@ -22,6 +23,8 @@ _BOOKTRACKER_STAGE_FUNCTIONS_LOADED=1
 : "${STAGED_STATE_FILE:=${DATA_DIR:-.}/staged.tsv}"
 : "${STAGING_DIR:=}"
 : "${ARIA2C_SEED_TIME:=0}"
+: "${ARIA2C_MAX_TRIES:=0}"
+: "${ARIA2C_SUMMARY_INTERVAL:=30}"
 : "${DUMP_ALLOWLIST:=lib.libavtor.sql.gz lib.libavtorname.sql.gz lib.libbook.sql.gz lib.libfilename.sql.gz lib.libgenre.sql.gz lib.libgenrelist.sql.gz lib.libjoinedbooks.sql.gz lib.librate.sql.gz lib.librecs.sql.gz lib.libseq.sql.gz lib.libseqname.sql.gz lib.libtranslator.sql.gz}"
 
 # stage_type_from_name <filename>
@@ -40,8 +43,8 @@ stage_type_from_name() {
 }
 
 # stage_destination <type>
-# Print the STAGING_DIR subfolder that a torrent type's payload goes into.
-# Returns 0 on success, 1 for an unknown type.
+# Print the STAGING_DIR subfolder that a torrent type's payload is downloaded
+# into.  Returns 0 on success, 1 for an unknown type.
 stage_destination() {
     case "$1" in
         inpx-fb2|inpx-all)       printf 'inpx\n' ;;
@@ -49,6 +52,13 @@ stage_destination() {
         monthly-fb2|monthly-usr) printf 'Latest\n' ;;
         *) return 1 ;;
     esac
+}
+
+# stage_sql_destination
+# Print the STAGING_DIR subfolder where a dump's decompressed `.sql` files go:
+# the "flibusta" folder, sibling to the "flibusta_gz" download folder.
+stage_sql_destination() {
+    printf 'flibusta\n'
 }
 
 # stage_is_allowed <type> <path>
@@ -71,26 +81,102 @@ stage_is_allowed() {
     esac
 }
 
-# stage_select_indexes <type>
-# Read aria2c "--show-files" style "idx|path" lines on stdin and print the
-# comma-separated 1-based indexes to download.  Selective types filter via
-# stage_is_allowed; full-download types print nothing (no per-file selection).
-stage_select_indexes() {
-    local type="$1" line idx path
-    local -a sel=()
+# stage_download_files <type>
+# Read aria2c "--show-files" style "idx|path" lines on stdin and print, one per
+# line, the "idx|path" pairs for every file in the download set.  Selective
+# types filter via stage_is_allowed; full-download types print every file.
+stage_download_files() {
+    local type="$1" line idx path selective=0
     case "$type" in
-        dump|inpx-fb2|inpx-all) : ;;
-        *)                      return 0 ;;   # full download → no per-file selection
+        dump|inpx-fb2|inpx-all) selective=1 ;;
     esac
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*([0-9]+)\|(.+)$ ]] || continue
         idx="${BASH_REMATCH[1]}"
         path="${BASH_REMATCH[2]}"
-        stage_is_allowed "$type" "$path" || continue
-        sel+=("$idx")
+        (( selective )) && ! stage_is_allowed "$type" "$path" && continue
+        printf '%s|%s\n' "$idx" "$path"
     done
+}
+
+# stage_select_indexes <type>
+# Read aria2c "--show-files" style "idx|path" lines on stdin and print the
+# comma-separated 1-based indexes to download (for --select-file).  Selective
+# types filter via stage_is_allowed; full-download types print nothing (no
+# per-file selection).
+stage_select_indexes() {
+    local type="$1" idx
+    local -a sel=()
+    case "$type" in
+        dump|inpx-fb2|inpx-all) : ;;
+        *)                      return 0 ;;   # full download → no per-file selection
+    esac
+    while IFS='|' read -r idx _; do
+        sel+=("$idx")
+    done < <(stage_download_files "$type")
     local IFS=,
     printf '%s\n' "${sel[*]}"
+}
+
+# stage_bytes_from_human <size>
+# Convert an aria2c "--show-files" length (e.g. "99.9MiB", "512B") to a whole
+# byte count.  Unknown input yields 0.
+stage_bytes_from_human() {
+    local s="${1:-}" num unit
+    s="${s//[[:space:]]/}"
+    if [[ "$s" =~ ^([0-9]+(\.[0-9]+)?)([KMGT]iB|B)$ ]]; then
+        num="${BASH_REMATCH[1]}"
+        unit="${BASH_REMATCH[3]}"
+        case "$unit" in
+            B)   awk -v n="$num" 'BEGIN { printf "%.0f", n }' ;;
+            KiB) awk -v n="$num" 'BEGIN { printf "%.0f", n * 1024 }' ;;
+            MiB) awk -v n="$num" 'BEGIN { printf "%.0f", n * 1048576 }' ;;
+            GiB) awk -v n="$num" 'BEGIN { printf "%.0f", n * 1073741824 }' ;;
+            TiB) awk -v n="$num" 'BEGIN { printf "%.0f", n * 1099511627776 }' ;;
+            *)   printf '0' ;;
+        esac
+    else
+        printf '0'
+    fi
+}
+
+# stage_total_size <type>
+# Read aria2c "--show-files" output on stdin and print the total byte size of
+# the download set (the "length" column summed over allowed files).  For a
+# torrent, aria2c prints each file as an "idx|path" line followed by a size
+# line carrying the exact byte count in parentheses, e.g.
+# "   |91MiB (96,397,659)".  That parenthesized count is used (comma-stripped);
+# if it is absent (some non-torrent listings), the human-readable size is
+# converted as a fallback.
+stage_total_size() {
+    local type="$1" line prev_path="" total=0 n
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[[:space:]]*([0-9]+)\|(.+)$ ]]; then
+            prev_path="${BASH_REMATCH[2]}"
+        elif [[ "$line" =~ ^[[:space:]]*\| ]]; then
+            if [[ -n "$prev_path" ]] && stage_is_allowed "$type" "$prev_path"; then
+                if [[ "$line" =~ \(([0-9][0-9,]*)\) ]]; then
+                    n="${BASH_REMATCH[1]//,/}"
+                else
+                    n="$(stage_bytes_from_human "${line#*|}")"
+                fi
+                total=$((total + n))
+            fi
+            prev_path=""
+        fi
+    done
+    printf '%s\n' "$total"
+}
+
+# stage_human_size <bytes>
+# Print a human-readable size (e.g. "7.0GiB") for a byte count.
+stage_human_size() {
+    awk -v n="${1:-0}" 'BEGIN {
+        split("B KiB MiB GiB TiB", u, " ");
+        i = 1;
+        while (n >= 1024 && i < 5) { n /= 1024; i++ }
+        printf "%.1f%s", n, u[i]
+    }'
 }
 
 # stage_is_done <torrent> [state_file]
@@ -114,19 +200,4 @@ stage_record() {
     fi
     ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ts" "$type" "$torrent" "$stamp" "$dest" "$files" >> "$state"
-}
-
-# stage_place <type> <src> <dest_dir>
-# Copy <src> into <dest_dir> honoring the collision rules: `inpx` types
-# overwrite an identical filename; every other type never clobbers (keeps
-# existing names).
-stage_place() {
-    local type="$1" src="$2" dir="$3" dst
-    [[ -f "$src" ]] || return 1
-    mkdir -p "$dir" 2>/dev/null || return 1
-    dst="$dir/$(basename "$src")"
-    case "$type" in
-        inpx-fb2|inpx-all) cp -f "$src" "$dst" ;;
-        *)                 cp -n "$src" "$dst" ;;
-    esac
 }
