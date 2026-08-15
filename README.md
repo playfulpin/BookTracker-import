@@ -246,6 +246,10 @@ Run the bash test suite (no network required):
 bash tests/run_tests.sh
 ```
 
+The full live import was verified against booktracker.org on 2026-08-14:
+`./bin/booktracker-import.sh all -f` resolved and downloaded all five release
+types successfully.
+
 ## How it works
 
 1. **Login** — `POST login.php` with `login_username`, `login_password`,

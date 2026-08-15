@@ -47,3 +47,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
 - Torrent link extraction now targets the anchor labeled "Скачать .torrent"
   (`download.php?id=…`) so helper attachments are ignored.
 - Torrent `creation date` parsing and UTC-consistent date comparisons.
+- Verified live on 2026-08-14: a full `all -f` run resolved and downloaded all
+  five release types successfully.
