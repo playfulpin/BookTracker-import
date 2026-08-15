@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
   existing files (`--check-integrity`), and print a progress summary every
   `ARIA2C_SUMMARY_INTERVAL` seconds — keeping multi-GB, multi-hour releases
   resilient and visible.
+- Staging enables DHT, peer exchange, and local peer discovery, and announces a
+  configurable set of fallback public trackers (`ARIA2C_EXTRA_TRACKERS`) so a
+  public torrent still finds peers when its original tracker is down or stale.
 - Selective downloads pin files flat with `--index-out` and use
   `--file-allocation=none` + `--bt-remove-unselected-file` so large adjacent
   archives (e.g. the dump's multi-GB `.zip`s) are neither preallocated nor

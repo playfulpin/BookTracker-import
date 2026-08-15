@@ -578,6 +578,12 @@ assert_eq "stage: dry-run shows the staged file name" "1" \
     "$(printf '%s' "$stage_out" | grep -c 'files=lib.inpx')"
 assert_eq "stage: dry-run shows the total download size" "1" \
     "$(printf '%s' "$stage_out" | grep -c 'total')"
+assert_eq "stage: dry-run enables DHT" "1" \
+    "$(printf '%s' "$stage_out" | grep -c -- '--enable-dht=true')"
+assert_eq "stage: dry-run enables peer exchange" "1" \
+    "$(printf '%s' "$stage_out" | grep -c -- '--enable-peer-exchange=true')"
+assert_eq "stage: dry-run announces fallback trackers" "1" \
+    "$(printf '%s' "$stage_out" | grep -c -- '--bt-tracker=')"
 assert_fail "stage: dry-run does not create the staging directory" \
     test -e "$STAGE_DIR_TEST"
 

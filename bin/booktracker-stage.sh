@@ -137,14 +137,23 @@ stage_one() {
     # Build the aria2c command.  Files download directly into the destination
     # directory, so there is no copy/move step afterwards.  Large releases can
     # be tens of GB and take hours, so aria2c retries indefinitely and prints a
-    # progress summary every ARIA2C_SUMMARY_INTERVAL seconds.
+    # progress summary every ARIA2C_SUMMARY_INTERVAL seconds.  DHT, peer
+    # exchange, and local peer discovery are enabled so a public torrent can
+    # still find peers if its original tracker is down; extra fallback trackers
+    # (ARIA2C_EXTRA_TRACKERS) are announced too.
     local -a aria_args=(
         --seed-time="${ARIA2C_SEED_TIME}"
         --max-tries="${ARIA2C_MAX_TRIES}"
         --summary-interval="${ARIA2C_SUMMARY_INTERVAL}"
         --check-integrity=true
+        --enable-dht=true
+        --enable-peer-exchange=true
+        --bt-enable-lpd=true
         --dir="$dest_dir"
     )
+    if [[ -n "${ARIA2C_EXTRA_TRACKERS:-}" ]]; then
+        aria_args+=(--bt-tracker="$ARIA2C_EXTRA_TRACKERS")
+    fi
     case "$type" in
         dump|inpx-fb2|inpx-all)
             select="$(stage_select_indexes "$type" <<< "$files_list")"

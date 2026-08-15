@@ -25,6 +25,7 @@ _BOOKTRACKER_STAGE_FUNCTIONS_LOADED=1
 : "${ARIA2C_SEED_TIME:=0}"
 : "${ARIA2C_MAX_TRIES:=0}"
 : "${ARIA2C_SUMMARY_INTERVAL:=30}"
+: "${ARIA2C_EXTRA_TRACKERS:=}"
 : "${DUMP_ALLOWLIST:=lib.libavtor.sql.gz lib.libavtorname.sql.gz lib.libbook.sql.gz lib.libfilename.sql.gz lib.libgenre.sql.gz lib.libgenrelist.sql.gz lib.libjoinedbooks.sql.gz lib.librate.sql.gz lib.librecs.sql.gz lib.libseq.sql.gz lib.libseqname.sql.gz lib.libtranslator.sql.gz}"
 
 # stage_type_from_name <filename>

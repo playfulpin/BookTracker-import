@@ -86,7 +86,11 @@ export DRY_RUN VERIFY_TORRENT
 ARIA2C_SEED_TIME="${ARIA2C_SEED_TIME:-0}"                   # minutes to seed after download (0 = stop)
 ARIA2C_MAX_TRIES="${ARIA2C_MAX_TRIES:-0}"                   # download attempts (0 = retry forever)
 ARIA2C_SUMMARY_INTERVAL="${ARIA2C_SUMMARY_INTERVAL:-30}"    # aria2c progress-summary interval (seconds)
-export ARIA2C_SEED_TIME ARIA2C_MAX_TRIES ARIA2C_SUMMARY_INTERVAL
+# Extra BitTorrent trackers (comma-separated) announced in addition to the
+# torrent's own trackers.  Fallback public trackers find peers when the
+# original tracker is down or stale but the torrent is public.  Empty = none.
+ARIA2C_EXTRA_TRACKERS="${ARIA2C_EXTRA_TRACKERS:-udp://tracker.opentrackr.org:1337/announce,udp://open.stealth.si:80/announce,udp://tracker.torrent.eu.org:451/announce,udp://tracker.moeking.me:6969/announce,udp://explodie.org:6969/announce,udp://tracker.birkenfeld.org:6969/announce,udp://open.demonii.com:1337/announce,udp://exodus.desync.com:6969/announce,udp://tracker.openbittorrent.com:6969/announce,http://tracker.opentrackr.org:1337/announce}"
+export ARIA2C_SEED_TIME ARIA2C_MAX_TRIES ARIA2C_SUMMARY_INTERVAL ARIA2C_EXTRA_TRACKERS
 
 # Which files to download from the database dump torrent.  Only these core
 # library tables are fetched; the .zip attached archives, the annotations

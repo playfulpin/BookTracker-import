@@ -279,6 +279,7 @@ Key settings (all overridable via environment or `.env`):
 | `ARIA2C_SEED_TIME` | `0` | Minutes to seed after download; `0` = stop (staging only). |
 | `ARIA2C_MAX_TRIES` | `0` | Download attempts; `0` = retry indefinitely (staging only). |
 | `ARIA2C_SUMMARY_INTERVAL` | `30` | aria2c progress-summary interval, in seconds (staging only). |
+| `ARIA2C_EXTRA_TRACKERS` | *(public tracker list)* | Extra announce trackers when the torrent's own tracker is down/stale (staging only). |
 
 Local paths, credentials, cookies, and other private information are not
 committed to the repository (see `.gitignore`).
