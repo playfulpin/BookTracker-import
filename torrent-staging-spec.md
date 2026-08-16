@@ -74,7 +74,7 @@ tables (`lib.a.annotations*.sql.gz`, `lib.b.annotations*.sql.gz`),
 | Re-runs | **Skip by default**; `--force` re-processes. Tracked in a state file. |
 | Resume | `--resume-only` skips torrents whose files are already complete; aria2c `--check-integrity` resumes partial downloads. |
 | State | **New state file** `data/staged.tsv`. |
-| Cleanup | **Direct download** — payloads land straight in `STAGING_DIR`; no working directory or archive step. |
+| Cleanup | **Direct download** — payloads land straight in `STAGING_DIR`; no working directory or archive step. A stale torrent-named folder left by an older nested run is removed before download. |
 | Verification | **Trust the client's piece hash-checking** (no extra checksum step). |
 | Tracker auth | Self-contained — the `.torrent` works as-is. |
 
@@ -207,16 +207,19 @@ Environment:
    - `dump`: indices of files whose names are in `DUMP_ALLOWLIST`.
    - `inpx-fb2`/`inpx-all`: indices of files whose names match `*.inpx`.
    - others: all files.
-5. Download the allowed files **directly into** the appropriate `STAGING_DIR`
+5. If a stale folder named after the torrent's `Name:` exists in the
+   destination (an older run nested files under it before `--index-out` pinned
+   them flat), remove it so it can't trigger checksum errors on resume.
+6. Download the allowed files **directly into** the appropriate `STAGING_DIR`
    subfolder using `aria2c --seed-time=0 --dir=<dest_dir>` (+ `--select-file`,
    `--index-out`, `--file-allocation=none`, `--bt-remove-unselected-file` for
    selective types).
-6. For `dump`, decompress each `.gz` → `.sql` into the sibling
+7. For `dump`, decompress each `.gz` → `.sql` into the sibling
    `STAGING/flibusta/` folder (`gzip -dc`), keeping the raw `.gz` in
    `flibusta_gz/`.
-7. Append a row to `data/staged.tsv`
+8. Append a row to `data/staged.tsv`
    (`staged_at`, `type`, `torrent`, `stamp`, `destination`, `files`).
-8. Log the outcome (reuse `log`/`log_info`/`log_warn`/`log_error`).
+9. Log the outcome (reuse `log`/`log_info`/`log_warn`/`log_error`).
 
 ## 9. Error handling & edge cases
 
@@ -226,6 +229,10 @@ Environment:
   record in `staged.tsv` so a later run retries.
 - **Partial download** → aria2c resumes via its `.aria2` control file left in
   the destination directory; otherwise re-download.
+- **Stale torrent-named folder** → a directory matching the torrent's `Name:`
+  inside the destination is a leftover from an older nested download; it is
+  removed before download (path-traversal names are rejected so nothing outside
+  the destination is ever touched).
 - **Collision** → per §7 collision rules (overwrite in `STAGING/inpx`, keep
   both in `STAGING/Latest`).
 - **Disk full / decompress failure** → log error, leave the partial files in

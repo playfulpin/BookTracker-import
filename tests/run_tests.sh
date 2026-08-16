@@ -438,6 +438,28 @@ assert_eq "stage_sql_destination returns the decompress folder" \
     "flibusta" \
     "$(stage_sql_destination)"
 
+# stage_torrent_name + stage_stale_dir (stale-folder safeguard).
+assert_eq "stage_torrent_name extracts the torrent Name" \
+    "FlibustaSQL" \
+    "$(stage_torrent_name <<< $'Files:\nName: FlibustaSQL\nidx|path/length')"
+assert_eq "stage_torrent_name returns nothing when Name is absent" \
+    "" \
+    "$(stage_torrent_name <<< $'Files:\nidx|path/length')"
+assert_eq "stage_torrent_name trims trailing whitespace and CR" \
+    "FlibustaSQL" \
+    "$(stage_torrent_name <<< $'Name: FlibustaSQL  \r')"
+
+mkdir -p "$TMPDIR_TEST/stdir/FlibustaSQL"
+assert_eq "stage_stale_dir finds a stale torrent-named dir" \
+    "$TMPDIR_TEST/stdir/FlibustaSQL" \
+    "$(stage_stale_dir "$TMPDIR_TEST/stdir" 'FlibustaSQL')"
+assert_fail "stage_stale_dir misses an absent dir" \
+    stage_stale_dir "$TMPDIR_TEST/stdir" 'Nope'
+assert_fail "stage_stale_dir rejects a path-traversal name" \
+    stage_stale_dir "$TMPDIR_TEST/stdir" '../etc'
+assert_fail "stage_stale_dir rejects an empty name" \
+    stage_stale_dir "$TMPDIR_TEST/stdir" ''
+
 ARIA2_SIZED_FILES='Files:
 idx|path/length
 ===+===========
@@ -515,10 +537,10 @@ case "$1" in
     --show-files)
         case "$2" in
             *dump*)
-                printf 'Files:\nidx|path/length\n===+===========\n  1|lib.libbook.sql.gz\n   |100B (100)\n  2|lib.a.attached.zip\n   |999B (999)\n'
+                printf 'Files:\nName: FlibustaSQL\nidx|path/length\n===+===========\n  1|lib.libbook.sql.gz\n   |100B (100)\n  2|lib.a.attached.zip\n   |999B (999)\n'
                 ;;
             *)
-                printf 'Files:\nidx|path/length\n===+===========\n  1|lib.inpx\n   |121KiB (123,904)\n  2|books.7z\n   |639KiB (654,336)\n'
+                printf 'Files:\nName: test\nidx|path/length\n===+===========\n  1|lib.inpx\n   |121KiB (123,904)\n  2|books.7z\n   |639KiB (654,336)\n'
                 ;;
         esac
         ;;
@@ -604,8 +626,12 @@ assert_ok "stage: torrent recorded in staged state" \
     grep -q "flibusta-inpx-fb2-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
 
 # Dump: .gz downloads into flibusta_gz/ and decompresses into the sibling
-# flibusta/ folder (keeping the raw .gz).
+# flibusta/ folder (keeping the raw .gz).  A stale torrent-named folder left by
+# an older nested download is removed before download.
 rm -f "$TMPDIR_TEST/staged-cli.tsv"
+rm -rf "$STAGE_DIR_TEST/flibusta_gz"
+mkdir -p "$STAGE_DIR_TEST/flibusta_gz/FlibustaSQL"
+printf 'stale' > "$STAGE_DIR_TEST/flibusta_gz/FlibustaSQL/stale.bin"
 touch "$TMPDIR_TEST/flibusta-dump-2026-08-01.torrent"
 stage_out4="$(env "${STAGE_ENV[@]}" \
     bash "$PROJECT_ROOT/bin/booktracker-stage.sh" "$TMPDIR_TEST/flibusta-dump-2026-08-01.torrent" 2>&1)"
@@ -619,6 +645,10 @@ assert_eq "stage: dump .sql has decompressed content" "sql-data" \
     "$(cat "$STAGE_DIR_TEST/flibusta/lib.libbook.sql")"
 assert_ok "stage: dump torrent recorded" \
     grep -q "flibusta-dump-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
+assert_fail "stage: stale torrent-named dir is removed before download" \
+    test -e "$STAGE_DIR_TEST/flibusta_gz/FlibustaSQL"
+assert_eq "stage: stale-dir removal is logged" "1" \
+    "$(printf '%s' "$stage_out4" | grep -c 'stale torrent-named')"
 
 # --resume-only: skip a torrent whose output file already exists (unrecorded).
 touch "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent"

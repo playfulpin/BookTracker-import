@@ -61,6 +61,7 @@ EOF
 # 1 on failure.
 stage_one() {
     local torrent_file="$1" name type dest dest_dir sql_dir select files_list
+    local torrent_name stale_dir
     local entry idx path base dst record_dest files_csv="" n=0 total_size=0
     local -a download_files=()
 
@@ -92,6 +93,9 @@ stage_one() {
     }
     # aria2c may emit CRLF on Windows; normalize so parsing is portable.
     files_list="${files_list//$'\r'/}"
+    # The torrent's top-level "Name:" — the folder an older aria2c run (before
+    # --index-out) would have nested files under in the destination.
+    torrent_name="$(stage_torrent_name <<< "$files_list")"
     while IFS='|' read -r idx path; do
         download_files+=("$idx|$path")
     done < <(stage_download_files "$type" <<< "$files_list")
@@ -168,6 +172,19 @@ stage_one() {
             done
             ;;
     esac
+
+    # Detect a stale torrent-named folder left by an earlier nested download;
+    # report it (dry-run) or remove it (real run) so it can't trigger checksum
+    # errors on every resume.
+    stale_dir="$(stage_stale_dir "$dest_dir" "$torrent_name")"
+    if [[ -n "$stale_dir" ]]; then
+        if (( DRY_RUN )); then
+            log_warn "[dry-run] would remove stale torrent-named dir: $stale_dir"
+        else
+            log_warn "removing stale torrent-named dir from a previous run: $stale_dir"
+            rm -rf -- "$stale_dir" || { log_error "failed to remove stale dir: $stale_dir"; return 1; }
+        fi
+    fi
 
     if (( DRY_RUN )); then
         log_info "[dry-run] would run: aria2c ${aria_args[*]} $torrent_file"

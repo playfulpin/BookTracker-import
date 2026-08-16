@@ -42,9 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
   - decompresses dump `.gz` files to `.sql` into a sibling `flibusta/` folder,
   - records results in `data/staged.tsv` (skip by default; `--force` re-runs).
 - Staging helper functions (`stage_type_from_name`, `stage_destination`,
-  `stage_sql_destination`, `stage_is_allowed`, `stage_download_files`,
-  `stage_select_indexes`, `stage_total_size`, `stage_human_size`,
-  `stage_bytes_from_human`, `stage_is_done`, `stage_record`).
+  `stage_sql_destination`, `stage_torrent_name`, `stage_stale_dir`,
+  `stage_is_allowed`, `stage_download_files`, `stage_select_indexes`,
+  `stage_total_size`, `stage_human_size`, `stage_bytes_from_human`,
+  `stage_is_done`, `stage_record`).
 
 ### Changed
 
@@ -68,6 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.10.
 - Added `--resume-only` to skip torrents whose files are already fully
   downloaded, and the script now logs the total download size per torrent
   before starting.
+- Staging now detects and removes a stale torrent-named folder in the
+  destination (left by an older run that nested files before `--index-out`
+  pinned them flat) before downloading, so it can't trigger checksum errors on
+  every resume.
 
 ### Fixed
 

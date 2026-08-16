@@ -6,10 +6,12 @@
 # by booktracker-import.sh into staged payload files under STAGING_DIR.
 # Sourced by the staging CLI (bin/booktracker-stage.sh) and by the test suite.
 #
-#   naming        stage_type_from_name, stage_destination, stage_sql_destination
+#   naming        stage_type_from_name, stage_destination, stage_sql_destination,
+#                 stage_torrent_name
 #   selection     stage_is_allowed, stage_download_files, stage_select_indexes,
 #                 stage_total_size
 #   formatting    stage_human_size, stage_bytes_from_human
+#   safeguard     stage_stale_dir
 #   state         stage_is_done, stage_record
 #
 # Requires: bash >= 4
@@ -167,6 +169,38 @@ stage_total_size() {
         fi
     done
     printf '%s\n' "$total"
+}
+
+# stage_torrent_name
+# Read aria2c "--show-files" output on stdin and print the torrent's top-level
+# "Name:" (the folder aria2c would nest files under without --index-out).
+# Empty output when the line is absent.
+stage_torrent_name() {
+    local line name
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[[:space:]]*Name:[[:space:]]*(.+)$ ]]; then
+            name="${BASH_REMATCH[1]}"
+            name="${name//$'\r'/}"                      # tolerate CRLF input
+            name="${name%"${name##*[![:space:]]}"}"     # trim trailing whitespace
+            printf '%s\n' "$name"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# stage_stale_dir <dest_dir> <torrent_name>
+# Print the path of a stale directory left under <dest_dir> by an older run
+# that nested downloaded files under the torrent's name (before --index-out
+# pinned them flat).  Prints nothing and returns 1 when there is none.  Names
+# containing path separators or "."/".." are rejected so nothing outside the
+# destination can ever be touched.
+stage_stale_dir() {
+    local dest_dir="$1" name="$2" stale
+    [[ -n "$name" && "$name" != "." && "$name" != ".." && "$name" != */* ]] || return 1
+    stale="$dest_dir/$name"
+    [[ -d "$stale" ]] || return 1
+    printf '%s\n' "$stale"
 }
 
 # stage_human_size <bytes>

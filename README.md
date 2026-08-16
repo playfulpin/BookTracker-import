@@ -225,6 +225,8 @@ Staging helpers live in `lib/booktracker-stage_functions.sh`:
 | `stage_human_size` | Format a byte count as human-readable (e.g. `7.0GiB`). |
 | `stage_bytes_from_human` | Convert an aria2c size like `99.9MiB` back to bytes. |
 | `stage_sql_destination` | Return the `flibusta` folder for decompressed dump `.sql`. |
+| `stage_torrent_name` | Extract the torrent's top-level `Name:` from an aria2c listing. |
+| `stage_stale_dir` | Locate a stale torrent-named folder left by an older nested download. |
 | `stage_is_done` / `stage_record` | Read / append the staging state file. |
 
 ## Configuration
@@ -344,15 +346,18 @@ files:
 1. **Select** — parse the torrent type from the filename, skip already-staged
    torrents (unless `--force`), and list the torrent's files with
    `aria2c --show-files`.
-2. **Download** — `aria2c` downloads the allowed files directly into the right
+2. **Clean** — before downloading, a stale folder named after the torrent (left
+   by an older run that nested files before `--index-out` pinned them flat) is
+   detected and removed, so it can't trigger checksum errors on every resume.
+3. **Download** — `aria2c` downloads the allowed files directly into the right
    `STAGING_DIR` subfolder (`inpx/`, `Latest/`, `flibusta_gz/`), with
    `--select-file` restricting selective types to their allowlist
    (`dump` → `DUMP_ALLOWLIST`, `inpx-*` → `*.inpx`).  It logs the total size,
    stops seeding immediately, retries indefinitely, and prints a progress
    summary every `ARIA2C_SUMMARY_INTERVAL` seconds.
-3. **Decompress** — dump `.gz` files are decompressed to `.sql` into the
+4. **Decompress** — dump `.gz` files are decompressed to `.sql` into the
    sibling `STAGING/flibusta/` folder; the raw `.gz` stay in `flibusta_gz/`.
-4. **Record** — a row is appended to `data/staged.tsv`, so re-runs skip
+5. **Record** — a row is appended to `data/staged.tsv`, so re-runs skip
    already-staged torrents.
 
 ## Torrent files & retention
