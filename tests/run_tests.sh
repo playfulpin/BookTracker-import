@@ -155,9 +155,13 @@ FAKE_INDEX_HTML='<span class="sf_title"><a href="./viewforum.php?f=256">Полн
 <a href="./viewforum.php?f=255">Ежемесячные архивы (Флибуста)</a>
 <a href="./viewforum.php?f=254">Еженедельные архивы (Флибуста)</a>'
 
-FAKE_FORUM_HTML='<a href="./viewtopic.php?t=104183" class="torTopic"><b>Флибуста (Flibusta) & Либрусек (lib.rus.ec)<wbr> 7z + FLibrary + inpx (2009-2026) [FB2+EPUB] на 01.08.2026 [локальная коллекция, ежемесячно пополняемая]</b></a>
+FAKE_FORUM_HTML='<a href="./viewtopic.php?t=46979" class="torTopic"><b>Библиотека Flibusta (только FB2) на 01.08.2026 (702461 книга) (локальная коллекция, пополняемая ежемесячно) + MyHomeLib + inpx</b></a>
+<a href="./viewtopic.php?t=64690" class="torTopic"><b>inpx для библиотеки Flibusta &quot;расшире<wbr>нный&quot; (сортированн<wbr>ый список) (01.08.2026)</b></a>
+<a href="viewtopic.php?t=27203">Inpx для библиотеки Flibusta.Net (только FB2) по состоянию на 1.04.2014</a>
 <a href="./viewtopic.php?t=104536" class="torTopic"><b>Дополнительн<wbr>ые данные библиотеки Flibusta [FB2] для FLibrary, 01.08.2026</b></a>
+<a href="./viewtopic.php?t=104183" class="torTopic"><b>Флибуста (Flibusta) & Либрусек (lib.rus.ec)<wbr> 7z + FLibrary + inpx (2009-2026) [FB2+EPUB] на 01.08.2026 [локальная коллекция, ежемесячно пополняемая]</b></a>
 <a href="viewtopic.php?t=73862">Дампы базы данных библиотеки Флибуста по состоянию на 01.08.2026</a>
+<a href="./viewtopic.php?t=67944" class="torTopic"><b>INPX для библиотеки Flibusta (только FB2) по состоянию на 01.08.2026</b></a>
 <a href="./viewtopic.php?t=105053" class="torTopic"><b>Архив книг за июль 2026 года (FB2, 879582-88339<wbr>4)</b></a>
 <a href="./viewtopic.php?t=105052" class="torTopic"><b>Архив книг за июль 2026 года [не-FB2, 123-456]</b></a>'
 
@@ -177,12 +181,12 @@ assert_eq "get_forumid resolves the monthly forum by title" \
 assert_fail "get_forumid fails when no forum matches" \
     get_forumid 'Несуществующий раздел'
 
-assert_eq "get_topicid finds the INPX (full) topic by title" \
-    "104183" \
-    "$(get_topicid 256 'inpx')"
-assert_eq "get_topicid finds the INPX (FB2 only) topic by title" \
-    "104536" \
-    "$(get_topicid 256 'Дополнительные данные')"
+assert_eq "get_topicid finds the extended INPX topic by title" \
+    "64690" \
+    "$(get_topicid 256 'расширенный')"
+assert_eq "get_topicid finds the FB2-only INPX topic by title" \
+    "67944" \
+    "$(get_topicid 256 'INPX для библиотеки Flibusta (только FB2)')"
 assert_eq "get_topicid finds the dump topic (no torTopic class) by title" \
     "73862" \
     "$(get_topicid 256 'Дампы базы данных библиотеки Флибуста')"
@@ -347,9 +351,9 @@ assert_fail "stage_type_from_name rejects an unknown type" \
 
 assert_eq "stage_destination maps inpx-fb2" "inpx" "$(stage_destination inpx-fb2)"
 assert_eq "stage_destination maps inpx-all" "inpx" "$(stage_destination inpx-all)"
-assert_eq "stage_destination maps dump" "flibusta_gz" "$(stage_destination dump)"
-assert_eq "stage_destination maps monthly-fb2" "Latest" "$(stage_destination monthly-fb2)"
-assert_eq "stage_destination maps monthly-usr" "Latest" "$(stage_destination monthly-usr)"
+assert_eq "stage_destination maps dump" "FlibustaSQL" "$(stage_destination dump)"
+assert_eq "stage_destination maps monthly-fb2" "book_archives" "$(stage_destination monthly-fb2)"
+assert_eq "stage_destination maps monthly-usr" "book_archives" "$(stage_destination monthly-usr)"
 assert_fail "stage_destination rejects an unknown type" stage_destination foo
 
 # Dump file list — mirrors the real FlibustaSQL torrent inspected 2026-08-14.
@@ -435,7 +439,7 @@ assert_eq "stage_download_files (full) lists every file" \
 
 # stage_sql_destination + size helpers.
 assert_eq "stage_sql_destination returns the decompress folder" \
-    "flibusta" \
+    "mysql_feeds" \
     "$(stage_sql_destination)"
 
 # stage_torrent_name + stage_stale_dir (stale-folder safeguard).
@@ -507,7 +511,7 @@ assert_eq "stage_human_size formats a large value" \
 # Staging state file (skip logic).
 STAGED_STATE_FILE="$TMPDIR_TEST/staged.tsv"
 stage_record dump "flibusta-dump-2026-08-01.torrent" "2026-08-01" \
-    "flibusta_gz" "lib.libbook.sql,lib.libavtor.sql" 2>/dev/null
+    "FlibustaSQL" "lib.libbook.sql,lib.libavtor.sql" 2>/dev/null
 assert_ok "stage_is_done finds a recorded torrent" \
     stage_is_done "flibusta-dump-2026-08-01.torrent" "$STAGED_STATE_FILE"
 assert_fail "stage_is_done misses an unrecorded torrent" \
@@ -521,8 +525,8 @@ assert_fail "stage_is_done returns false without a state file" \
 stage_rc="$(bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --help >/dev/null 2>&1; echo $?)"
 assert_eq "stage: --help exits 0" "0" "$stage_rc"
 
-stage_rc="$(env -u STAGING_DIR BOOKTRACKER_NO_ENV=1 bash "$PROJECT_ROOT/bin/booktracker-stage.sh" >/dev/null 2>&1; echo $?)"
-assert_eq "stage: missing STAGING_DIR exits non-zero" "2" "$stage_rc"
+stage_rc="$(STAGING_DIR=relative/path BOOKTRACKER_NO_ENV=1 bash "$PROJECT_ROOT/bin/booktracker-stage.sh" >/dev/null 2>&1; echo $?)"
+assert_eq "stage: relative STAGING_DIR exits non-zero" "2" "$stage_rc"
 
 stage_rc="$(STAGING_DIR=/tmp bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --bogus >/dev/null 2>&1; echo $?)"
 assert_eq "stage: unknown option exits non-zero" "2" "$stage_rc"
@@ -625,28 +629,28 @@ assert_fail "stage: no intermediate work/archive directory is created" \
 assert_ok "stage: torrent recorded in staged state" \
     grep -q "flibusta-inpx-fb2-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
 
-# Dump: .gz downloads into flibusta_gz/ and decompresses into the sibling
-# flibusta/ folder (keeping the raw .gz).  A stale torrent-named folder left by
+# Dump: .gz downloads into FlibustaSQL/ and decompresses into the sibling
+# mysql_feeds/ folder (keeping the raw .gz).  A stale torrent-named folder left by
 # an older nested download is removed before download.
 rm -f "$TMPDIR_TEST/staged-cli.tsv"
-rm -rf "$STAGE_DIR_TEST/flibusta_gz"
-mkdir -p "$STAGE_DIR_TEST/flibusta_gz/FlibustaSQL"
-printf 'stale' > "$STAGE_DIR_TEST/flibusta_gz/FlibustaSQL/stale.bin"
+rm -rf "$STAGE_DIR_TEST/FlibustaSQL"
+mkdir -p "$STAGE_DIR_TEST/FlibustaSQL/FlibustaSQL"
+printf 'stale' > "$STAGE_DIR_TEST/FlibustaSQL/FlibustaSQL/stale.bin"
 touch "$TMPDIR_TEST/flibusta-dump-2026-08-01.torrent"
 stage_out4="$(env "${STAGE_ENV[@]}" \
     bash "$PROJECT_ROOT/bin/booktracker-stage.sh" "$TMPDIR_TEST/flibusta-dump-2026-08-01.torrent" 2>&1)"
 stage_rc4=$?
 assert_eq "stage: dump run exits 0" "0" "$stage_rc4"
-assert_ok "stage: dump .gz downloaded into flibusta_gz" \
-    test -f "$STAGE_DIR_TEST/flibusta_gz/lib.libbook.sql.gz"
-assert_ok "stage: dump .sql decompressed into flibusta" \
-    test -f "$STAGE_DIR_TEST/flibusta/lib.libbook.sql"
+assert_ok "stage: dump .gz downloaded into FlibustaSQL" \
+    test -f "$STAGE_DIR_TEST/FlibustaSQL/lib.libbook.sql.gz"
+assert_ok "stage: dump .sql decompressed into mysql_feeds" \
+    test -f "$STAGE_DIR_TEST/mysql_feeds/lib.libbook.sql"
 assert_eq "stage: dump .sql has decompressed content" "sql-data" \
-    "$(cat "$STAGE_DIR_TEST/flibusta/lib.libbook.sql")"
+    "$(cat "$STAGE_DIR_TEST/mysql_feeds/lib.libbook.sql")"
 assert_ok "stage: dump torrent recorded" \
     grep -q "flibusta-dump-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
 assert_fail "stage: stale torrent-named dir is removed before download" \
-    test -e "$STAGE_DIR_TEST/flibusta_gz/FlibustaSQL"
+    test -e "$STAGE_DIR_TEST/FlibustaSQL/FlibustaSQL"
 assert_eq "stage: stale-dir removal is logged" "1" \
     "$(printf '%s' "$stage_out4" | grep -c 'stale torrent-named')"
 

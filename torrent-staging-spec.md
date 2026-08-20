@@ -20,7 +20,7 @@ The feature is a separate tool, not a change to the existing downloader.
 
 - discovers forum/topic ids at runtime (`get_forumid` / `get_topicid`),
 - downloads the `.torrent` **metadata** files (not the payloads) via `curl`,
-- stores them as `data/torrents/flibusta-<type>-<stamp>.torrent`,
+- stores them as `STAGING_DIR/torrents/flibusta-<type>-<stamp>.torrent`,
 - records downloads in `data/downloads.tsv`.
 
 The five torrent types and their observed payloads:
@@ -68,7 +68,7 @@ tables (`lib.a.annotations*.sql.gz`, `lib.b.annotations*.sql.gz`),
 | Dump payload | Dump torrent directly contains `*.gz` files; decompressed to `.sql` when staged. |
 | `inpx-all` `.7z` archives | **Not downloaded** — `inpx-all` downloads only its `.inpx` files. |
 | Monthly payloads | Both `.zip` archives are staged **as-is** (not unpacked). |
-| Layout | `STAGING/inpx/`, `STAGING/Latest/`, `STAGING/flibusta_gz/` + `STAGING/flibusta/` (decompressed dump; see §7). |
+| Layout | `STAGING/inpx/`, `STAGING/book_archives/`, `STAGING/FlibustaSQL/` + `STAGING/mysql_feeds/` (decompressed dump; see §7). |
 | Trigger | **Manual command only** (no cron/auto-hook). |
 | Seeding | **Stop immediately** after download (aria2c `--seed-time=0`). |
 | Re-runs | **Skip by default**; `--force` re-processes. Tracked in a state file. |
@@ -96,9 +96,9 @@ downloads so there is a single engine.
 
 ### 4.1 Inputs
 
-- `.torrent` files in `data/torrents/` matching `flibusta-<type>-<stamp>.torrent`.
+- `.torrent` files in `STAGING_DIR/torrents/` matching `flibusta-<type>-<stamp>.torrent`.
 - The type is parsed from the filename (the `-<type>-` segment).
-- `STAGING_DIR` must be set to an absolute path (error if missing/empty).
+- `STAGING_DIR` must be an absolute path (error if empty or relative).
 
 ### 4.2 Outputs
 
@@ -117,8 +117,8 @@ downloads so there is a single engine.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `STAGING_DIR` | *(none — required)* | Absolute path to the staging root. |
-| `TORRENT_DIR` | `data/torrents` | Where input `.torrent` files live (reuse existing). |
+| `STAGING_DIR` | `/Downloads/flibusta_snapshot` | Absolute path to the download root. |
+| `TORRENT_DIR` | `$STAGING_DIR/torrents` | Where input `.torrent` files live. |
 | `ARCHIVE_DIR` | `data/archive` | Where the working dir is archived after staging. |
 | `STATE_FILE` | `data/downloads.tsv` | Existing download state (unchanged). |
 | `STAGED_STATE_FILE` | `data/staged.tsv` | New: records staged torrents. |
@@ -154,7 +154,7 @@ Options:
   -h, --help        Show this help
 
 Environment:
-  STAGING_DIR     (required) absolute path to the staging root
+  STAGING_DIR     download root (default: /Downloads/flibusta_snapshot)
 ```
 
 ## 7. Per-type behavior
@@ -170,32 +170,32 @@ Environment:
 - Download the `.inpx` files directly into `STAGING/inpx/`.
 - The `.7z` book archives are **not downloaded** at all.
 
-### 7.3 `dump` → `STAGING/flibusta_gz/`
+### 7.3 `dump` → `STAGING/FlibustaSQL/`
 
 - **Selective**: inspect the torrent's file list and download only the 12
   `DUMP_ALLOWLIST` files (core library tables) via
   `aria2c --select-file=<indices>`.
 - Everything else is **never downloaded** — the `.zip` attached archives, the
   annotations tables, `lib.md5.txt.gz`, and `lib.reviews.sql.gz`.
-- Download the allowed `.gz` files directly into `STAGING/flibusta_gz/`, then
-  decompress each to `.sql` into the sibling `STAGING/flibusta/` folder
-  (keeping the raw `.gz` in `flibusta_gz/`).
+- Download the allowed `.gz` files directly into `STAGING/FlibustaSQL/`, then
+  decompress each to `.sql` into the sibling `STAGING/mysql_feeds/` folder
+  (keeping the raw `.gz` in `FlibustaSQL/`).
 
-### 7.4 `monthly-fb2` → `STAGING/Latest/`
+### 7.4 `monthly-fb2` → `STAGING/book_archives/`
 
-- Full download, directly into `STAGING/Latest/`.
+- Full download, directly into `STAGING/book_archives/`.
 
-### 7.5 `monthly-usr` → `STAGING/Latest/`
+### 7.5 `monthly-usr` → `STAGING/book_archives/`
 
-- Full download, directly into `STAGING/Latest/` (distinct names from
+- Full download, directly into `STAGING/book_archives/` (distinct names from
   `monthly-fb2`).
 
 ### Collision rules
 
 - `STAGING/inpx/`: both `inpx-fb2` and `inpx-all` may drop `.inpx` files there;
   **keep both, overwrite on identical filename**.
-- `STAGING/Latest/`: both monthly archives coexist; **keep names** (they differ).
-- `STAGING/flibusta_gz/` + `STAGING/flibusta/`: a new dump overwrites the
+- `STAGING/book_archives/`: both monthly archives coexist; **keep names** (they differ).
+- `STAGING/FlibustaSQL/` + `STAGING/mysql_feeds/`: a new dump overwrites the
   previous dump's same-named files (latest dump wins).
 
 ## 8. Processing flow (per torrent)
@@ -215,15 +215,15 @@ Environment:
    `--index-out`, `--file-allocation=none`, `--bt-remove-unselected-file` for
    selective types).
 7. For `dump`, decompress each `.gz` → `.sql` into the sibling
-   `STAGING/flibusta/` folder (`gzip -dc`), keeping the raw `.gz` in
-   `flibusta_gz/`.
+   `STAGING/mysql_feeds/` folder (`gzip -dc`), keeping the raw `.gz` in
+   `FlibustaSQL/`.
 8. Append a row to `data/staged.tsv`
    (`staged_at`, `type`, `torrent`, `stamp`, `destination`, `files`).
 9. Log the outcome (reuse `log`/`log_info`/`log_warn`/`log_error`).
 
 ## 9. Error handling & edge cases
 
-- **Missing `STAGING_DIR`** → error and exit non-zero.
+- **Empty or relative `STAGING_DIR`** → error and exit non-zero.
 - **Unknown/corrupt `.torrent`** → log error, skip that file, continue others.
 - **No seeders / stall** → rely on aria2c retry/timeout; log failure; do not
   record in `staged.tsv` so a later run retries.
@@ -234,7 +234,7 @@ Environment:
   removed before download (path-traversal names are rejected so nothing outside
   the destination is ever touched).
 - **Collision** → per §7 collision rules (overwrite in `STAGING/inpx`, keep
-  both in `STAGING/Latest`).
+  both in `STAGING/book_archives`).
 - **Disk full / decompress failure** → log error, leave the partial files in
   place for manual recovery, do not mark staged.
 - **Dry run** → print the aria2c command + destination without downloading.
@@ -243,7 +243,7 @@ Environment:
 
 | # | Resolution |
 | --- | --- |
-| OQ-1 | `STAGING_DIR` is **required** — fail fast with a clear error if unset/empty. |
+| OQ-1 | `STAGING_DIR` defaults to `/Downloads/flibusta_snapshot` — fail fast if empty or relative. |
 | OQ-2 | `inpx-all` is **selective**: download only `.inpx`, skip the `.7z` books. |
 | OQ-3 | Monthly `.zip` archives are kept **as `.zip`** (not unpacked). |
 | OQ-4 | Dump `.gz` files are **decompressed to `.sql`** before staging. |

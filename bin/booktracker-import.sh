@@ -5,6 +5,16 @@
 # Command-line front end for importing Флибуста (Flibusta) book torrents from
 # booktracker.org.  Site logic lives in lib/booktracker-import_functions.sh;
 # this script only parses arguments and dispatches.
+#
+# Version:   0.1.0
+# Updated:   2026-08-20
+#
+# Examples:
+#   # Download the FB2-only INPX index torrent:
+#   ./bin/booktracker-import.sh get-inpx-fb2
+#
+#   # Download the previous month's FB2 book archive:
+#   ./bin/booktracker-import.sh get-monthly-fb2
 # =============================================================================
 
 set -u
@@ -56,6 +66,9 @@ Options may appear before or after the command (e.g. `all -f`).
 
 Credentials are read from BOOKTRACKER_USERNAME / BOOKTRACKER_PASSWORD
 (environment variables or a gitignored .env file in the project root).
+
+Downloaded .torrent files are saved under the download root's torrents/
+folder (STAGING_DIR/torrents, default /Downloads/flibusta_snapshot/torrents).
 EOF
 }
 

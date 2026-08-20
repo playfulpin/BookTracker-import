@@ -23,7 +23,11 @@ _BOOKTRACKER_STAGE_FUNCTIONS_LOADED=1
 
 # Sensible fallbacks so the library is usable even if config.sh was not sourced.
 : "${STAGED_STATE_FILE:=${DATA_DIR:-.}/staged.tsv}"
-: "${STAGING_DIR:=}"
+: "${STAGING_DIR:=/Downloads/flibusta_snapshot}"
+: "${INPX_SUBDIR:=inpx}"
+: "${FLIBUSTA_SQL_SUBDIR:=FlibustaSQL}"
+: "${MYSQL_FEEDS_SUBDIR:=mysql_feeds}"
+: "${BOOK_ARCHIVES_SUBDIR:=book_archives}"
 : "${ARIA2C_SEED_TIME:=0}"
 : "${ARIA2C_MAX_TRIES:=0}"
 : "${ARIA2C_SUMMARY_INTERVAL:=30}"
@@ -50,18 +54,18 @@ stage_type_from_name() {
 # into.  Returns 0 on success, 1 for an unknown type.
 stage_destination() {
     case "$1" in
-        inpx-fb2|inpx-all)       printf 'inpx\n' ;;
-        dump)                    printf 'flibusta_gz\n' ;;
-        monthly-fb2|monthly-usr) printf 'Latest\n' ;;
+        inpx-fb2|inpx-all)       printf '%s\n' "$INPX_SUBDIR" ;;
+        dump)                    printf '%s\n' "$FLIBUSTA_SQL_SUBDIR" ;;
+        monthly-fb2|monthly-usr) printf '%s\n' "$BOOK_ARCHIVES_SUBDIR" ;;
         *) return 1 ;;
     esac
 }
 
 # stage_sql_destination
-# Print the STAGING_DIR subfolder where a dump's decompressed `.sql` files go:
-# the "flibusta" folder, sibling to the "flibusta_gz" download folder.
+# Print the STAGING_DIR subfolder where a dump's decompressed `.sql` files go
+# (mysql_feeds), sibling to the FlibustaSQL download folder.
 stage_sql_destination() {
-    printf 'flibusta\n'
+    printf '%s\n' "$MYSQL_FEEDS_SUBDIR"
 }
 
 # stage_is_allowed <type> <path>

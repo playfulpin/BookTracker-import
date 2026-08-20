@@ -17,10 +17,31 @@ export PROJECT_ROOT
 
 DATA_DIR="${DATA_DIR:-$PROJECT_ROOT/data}"
 LOG_DIR="${LOG_DIR:-$PROJECT_ROOT/logs}"
-TORRENT_DIR="${TORRENT_DIR:-$DATA_DIR/torrents}"
 COOKIE_JAR="${COOKIE_JAR:-$DATA_DIR/cookies.txt}"
 LOG_FILE="${LOG_FILE:-$LOG_DIR/booktracker-import.log}"
-export DATA_DIR LOG_DIR TORRENT_DIR COOKIE_JAR LOG_FILE
+export DATA_DIR LOG_DIR COOKIE_JAR LOG_FILE
+
+# --- Download root / staging area -------------------------------------------
+# All Flibusta downloads — the .torrent files and the payloads they fetch —
+# live under a single download root so the heavy multi-GB archives stay
+# isolated from the small metadata/catalog updates.  Defaults to the
+# "flibusta_snapshot" staging area under /Downloads (see README "Download
+# folder structure").  Override via the environment or .env.
+STAGING_DIR="${STAGING_DIR:-/Downloads/flibusta_snapshot}"
+export STAGING_DIR
+
+# .torrent files (downloaded by booktracker-import.sh, consumed by
+# booktracker-stage.sh) live in the download root's torrents/ folder.
+TORRENT_DIR="${TORRENT_DIR:-$STAGING_DIR/torrents}"
+export TORRENT_DIR
+
+# Subfolders of STAGING_DIR where staged payloads land.  Names are relative to
+# STAGING_DIR so each can be relocated independently.
+INPX_SUBDIR="${INPX_SUBDIR:-inpx}"                            # *.inpx catalog/index files
+FLIBUSTA_SQL_SUBDIR="${FLIBUSTA_SQL_SUBDIR:-FlibustaSQL}"     # *.sql.gz database dumps
+MYSQL_FEEDS_SUBDIR="${MYSQL_FEEDS_SUBDIR:-mysql_feeds}"       # decompressed *.sql
+BOOK_ARCHIVES_SUBDIR="${BOOK_ARCHIVES_SUBDIR:-book_archives}" # monthly *.zip bundles
+export INPX_SUBDIR FLIBUSTA_SQL_SUBDIR MYSQL_FEEDS_SUBDIR BOOK_ARCHIVES_SUBDIR
 
 # --- Site -------------------------------------------------------------------
 BOOKTRACKER_BASE_URL="${BOOKTRACKER_BASE_URL:-https://booktracker.org}"
@@ -52,8 +73,8 @@ export LOG_LEVEL
 FORUM_FULL_COLLECTIONS_TITLE="${FORUM_FULL_COLLECTIONS_TITLE:-Полные сборки библиотеки Флибуста}"
 FORUM_MONTHLY_TITLE="${FORUM_MONTHLY_TITLE:-Ежемесячные архивы (Флибуста)}"
 
-TOPIC_INPX_ALL_TITLE="${TOPIC_INPX_ALL_TITLE:-inpx}"                  # full collection ("7z + FLibrary + inpx")
-TOPIC_INPX_FB2_TITLE="${TOPIC_INPX_FB2_TITLE:-Дополнительные данные}" # FB2-only data release
+TOPIC_INPX_ALL_TITLE="${TOPIC_INPX_ALL_TITLE:-расширенный}"                                # full/extended ("расширенный") INPX index
+TOPIC_INPX_FB2_TITLE="${TOPIC_INPX_FB2_TITLE:-INPX для библиотеки Flibusta (только FB2)}" # FB2-only INPX index
 TOPIC_DUMP_TITLE="${TOPIC_DUMP_TITLE:-Дампы базы данных библиотеки Флибуста}"
 
 export FORUM_FULL_COLLECTIONS_TITLE FORUM_MONTHLY_TITLE

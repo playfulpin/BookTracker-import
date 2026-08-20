@@ -162,13 +162,13 @@ Enable debug logging:
 ### Staging (download torrent contents)
 
 After `booktracker-import.sh` has fetched the `.torrent` files, stage their
-contents with `bin/booktracker-stage.sh`.  `STAGING_DIR` (an absolute path) is
-required:
+contents with `bin/booktracker-stage.sh`.  `STAGING_DIR` defaults to
+`/Downloads/flibusta_snapshot` and can be overridden via the environment or `.env`:
 
 ```bash
-export STAGING_DIR=/path/to/staging
-./bin/booktracker-stage.sh                                 # every .torrent in data/torrents/
-./bin/booktracker-stage.sh data/torrents/flibusta-dump-2026-08-01.torrent
+export STAGING_DIR=/Downloads/flibusta_snapshot   # optional; this is the default
+./bin/booktracker-stage.sh                                 # every .torrent in STAGING_DIR/torrents/
+./bin/booktracker-stage.sh /Downloads/flibusta_snapshot/torrents/flibusta-dump-2026-08-01.torrent
 ```
 
 `aria2c` downloads the payloads.  Selective types fetch only allowed files:
@@ -176,8 +176,8 @@ export STAGING_DIR=/path/to/staging
 | Type | Downloaded | Staged to |
 | --- | --- | --- |
 | `inpx-fb2` / `inpx-all` | `*.inpx` | `STAGING/inpx/` |
-| `dump` | the 12 `DUMP_ALLOWLIST` tables (`.gz`) | `STAGING/flibusta_gz/`, decompressed to `STAGING/flibusta/` |
-| `monthly-fb2` / `monthly-usr` | whole torrent | `STAGING/Latest/` |
+| `dump` | the 12 `DUMP_ALLOWLIST` tables (`.gz`) | `STAGING/FlibustaSQL/`, decompressed to `STAGING/mysql_feeds/` |
+| `monthly-fb2` / `monthly-usr` | whole torrent | `STAGING/book_archives/` |
 
 ```bash
 ./bin/booktracker-stage.sh --dry-run     # print what would happen
@@ -224,10 +224,37 @@ Staging helpers live in `lib/booktracker-stage_functions.sh`:
 | `stage_total_size` | Sum the download set's byte sizes from an aria2c listing. |
 | `stage_human_size` | Format a byte count as human-readable (e.g. `7.0GiB`). |
 | `stage_bytes_from_human` | Convert an aria2c size like `99.9MiB` back to bytes. |
-| `stage_sql_destination` | Return the `flibusta` folder for decompressed dump `.sql`. |
+| `stage_sql_destination` | Return the `mysql_feeds` folder for decompressed dump `.sql`. |
 | `stage_torrent_name` | Extract the torrent's top-level `Name:` from an aria2c listing. |
 | `stage_stale_dir` | Locate a stale torrent-named folder left by an older nested download. |
 | `stage_is_done` / `stage_record` | Read / append the staging state file. |
+
+## Download folder structure
+
+All Flibusta downloads live under a single download root (`STAGING_DIR`),
+which defaults to `/Downloads/flibusta_snapshot`.  The `.torrent` files and
+their staged payloads are organized as follows:
+
+```text
+/Downloads                        # ROOT for all downloads
+└── flibusta_snapshot             # staging / collecting area for Flibusta
+    ├── book_archives/            # monthly *.zip bundles (f.fb2-…, f.usr-…)
+    ├── FlibustaSQL/              # *.sql.gz database dumps
+    ├── inpx/                     # *.inpx catalog/index files
+    ├── mysql_feeds/              # decompressed *.sql, ready for MySQL
+    └── torrents/                 # *.torrent files
+```
+
+| Subfolder | Contents | Filled by |
+| --- | --- | --- |
+| `torrents/` | `flibusta-<type>-<stamp>.torrent` | `booktracker-import.sh` |
+| `inpx/` | `*.inpx` | `booktracker-stage.sh` (`inpx-fb2`, `inpx-all`) |
+| `FlibustaSQL/` | `*.sql.gz` | `booktracker-stage.sh` (`dump`) |
+| `mysql_feeds/` | `*.sql` (decompressed) | `booktracker-stage.sh` (`dump`) |
+| `book_archives/` | monthly `.zip` book bundles | `booktracker-stage.sh` (`monthly-fb2`, `monthly-usr`) |
+
+> `FlibustaSQL` is preserved deliberately: it matches the folder name used
+> by the library's official torrent packages.
 
 ## Configuration
 
@@ -248,6 +275,7 @@ Credentials are read from the environment variables `BOOKTRACKER_USERNAME` and
 cat > .env <<'EOF'
 BOOKTRACKER_USERNAME=
 BOOKTRACKER_PASSWORD=
+STAGING_DIR=/Downloads/flibusta_snapshot
 EOF
 ```
 
@@ -275,7 +303,12 @@ Key settings (all overridable via environment or `.env`):
 | `ARCHIVE_TORRENTS` | `1` | `1` = archive superseded files, `0` = delete them. |
 | `TORRENT_RETENTION_DAYS` | `0` | Prune archive files older than N days (`0` = keep). |
 | `STATE_FILE` | project `data/downloads.tsv` | Download state/history log. |
-| `STAGING_DIR` | *(none — required)* | Absolute path to the staging root (staging only). |
+| `STAGING_DIR` | `/Downloads/flibusta_snapshot` | Download root for torrents and staged payloads (staging only). |
+| `TORRENT_DIR` | `$STAGING_DIR/torrents` | Where `.torrent` files are saved and read. |
+| `INPX_SUBDIR` | `inpx` | `STAGING_DIR` subfolder for `*.inpx` files. |
+| `FLIBUSTA_SQL_SUBDIR` | `FlibustaSQL` | `STAGING_DIR` subfolder for `*.sql.gz` dumps. |
+| `MYSQL_FEEDS_SUBDIR` | `mysql_feeds` | `STAGING_DIR` subfolder for decompressed `*.sql`. |
+| `BOOK_ARCHIVES_SUBDIR` | `book_archives` | `STAGING_DIR` subfolder for monthly `.zip` bundles. |
 | `DUMP_ALLOWLIST` | *(12 filenames)* | Dump files to download (staging only). |
 | `STAGED_STATE_FILE` | project `data/staged.tsv` | Staging state/history log (staging only). |
 | `ARIA2C_SEED_TIME` | `0` | Minutes to seed after download; `0` = stop (staging only). |
@@ -350,19 +383,19 @@ files:
    by an older run that nested files before `--index-out` pinned them flat) is
    detected and removed, so it can't trigger checksum errors on every resume.
 3. **Download** — `aria2c` downloads the allowed files directly into the right
-   `STAGING_DIR` subfolder (`inpx/`, `Latest/`, `flibusta_gz/`), with
+   `STAGING_DIR` subfolder (`inpx/`, `book_archives/`, `FlibustaSQL/`), with
    `--select-file` restricting selective types to their allowlist
    (`dump` → `DUMP_ALLOWLIST`, `inpx-*` → `*.inpx`).  It logs the total size,
    stops seeding immediately, retries indefinitely, and prints a progress
    summary every `ARIA2C_SUMMARY_INTERVAL` seconds.
 4. **Decompress** — dump `.gz` files are decompressed to `.sql` into the
-   sibling `STAGING/flibusta/` folder; the raw `.gz` stay in `flibusta_gz/`.
+   sibling `STAGING/mysql_feeds/` folder; the raw `.gz` stay in `FlibustaSQL/`.
 5. **Record** — a row is appended to `data/staged.tsv`, so re-runs skip
    already-staged torrents.
 
 ## Torrent files & retention
 
-Downloaded torrents are stored under `data/torrents/` and named
+Downloaded torrents are stored under the download root's `torrents/` folder and named
 `<prefix>-<type>-<stamp>.torrent`:
 
 | Type | Example name | Stamp |
@@ -373,7 +406,7 @@ Downloaded torrents are stored under `data/torrents/` and named
 | `monthly-fb2` | `flibusta-monthly-fb2-2026-07.torrent` | coverage month |
 | `monthly-usr` | `flibusta-monthly-usr-2026-07.torrent` | coverage month |
 
-Retention keeps `data/torrents/` tidy by holding only the latest file per type:
+Retention keeps the download root's `torrents/` folder tidy by holding only the latest file per type:
 
 * **Archive** — when a newer torrent of the same type is downloaded, the
   previous file is moved to `data/archive/` (`ARCHIVE_TORRENTS=1`) or deleted

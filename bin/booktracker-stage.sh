@@ -5,7 +5,7 @@
 # Downloads the contents of the .torrent files produced by
 # bin/booktracker-import.sh directly into a local STAGING_DIR using aria2c,
 # fetching only the allowed files for selective torrent types (dump, inpx-*).
-# Dump .gz files are decompressed into a sibling "flibusta" folder.  Pure logic
+# Dump .gz files are decompressed into a sibling "mysql_feeds" folder.  Pure logic
 # lives in lib/booktracker-stage_functions.sh; this script orchestrates
 # discovery, download, in-place decompression, and state tracking.
 # =============================================================================
@@ -50,7 +50,7 @@ Options:
   -h, --help        Show this help
 
 Environment:
-  STAGING_DIR     (required) absolute path to the staging root
+  STAGING_DIR     download root (default: /Downloads/flibusta_snapshot)
 EOF
 }
 
@@ -78,8 +78,8 @@ stage_one() {
 
     dest="$(stage_destination "$type")" || { log_error "no destination for type '$type'"; return 1; }
     dest_dir="$STAGING_DIR/$dest"
-    # dump downloads its .gz into flibusta_gz and decompresses into the sibling
-    # "flibusta" folder.
+    # dump downloads its .gz into FlibustaSQL and decompresses into the sibling
+    # "mysql_feeds" folder.
     sql_dir=""
     [[ "$type" == dump ]] && sql_dir="$STAGING_DIR/$(stage_sql_destination)"
 
@@ -116,7 +116,7 @@ stage_one() {
         n=$((n + 1))
     done
 
-    # The record's destination: dump's .sql land in "flibusta", everything else
+    # The record's destination: dump's .sql land in "mysql_feeds", everything else
     # lands in its download directory.
     record_dest="$dest"
     [[ "$type" == dump ]] && record_dest="$(stage_sql_destination)"
@@ -200,8 +200,8 @@ stage_one() {
         return 1
     fi
 
-    # Decompress dump .gz files into the sibling "flibusta" folder, keeping the
-    # raw .gz in flibusta_gz.
+    # Decompress dump .gz files into the sibling "mysql_feeds" folder, keeping the
+    # raw .gz in FlibustaSQL.
     if [[ "$type" == dump ]]; then
         mkdir -p "$sql_dir" || { log_error "cannot create decompress dir: $sql_dir"; return 1; }
         for entry in "${download_files[@]}"; do
@@ -263,7 +263,7 @@ main() {
 
     # Validate the environment.
     if [[ -z "${STAGING_DIR:-}" ]]; then
-        log_error "STAGING_DIR is not set (required; absolute path to the staging root)"
+        log_error "STAGING_DIR is empty (set it to the download root, e.g. /Downloads/flibusta_snapshot)"
         return 2
     fi
     if [[ "${STAGING_DIR:0:1}" != "/" ]]; then
