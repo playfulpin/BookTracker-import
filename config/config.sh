@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# booktracker-import — configuration
+# config.sh — booktracker-import configuration
 #
 # Site-specific settings and local paths live here so that application logic
 # (in lib/) stays generic.  Every value can be overridden via the environment
 # or a gitignored .env file, so no private data needs to be committed.
 #
 # This file is sourced (it defines variables only; it performs no actions).
+#
+# Version:  0.1.2
+# Updated:  2026-08-20 18:08 CDT
 # =============================================================================
 
 # --- Project paths ----------------------------------------------------------
@@ -55,7 +58,7 @@ BOOKTRACKER_PASSWORD="${BOOKTRACKER_PASSWORD:-}"
 export BOOKTRACKER_USERNAME BOOKTRACKER_PASSWORD
 
 # --- HTTP -------------------------------------------------------------------
-HTTP_USER_AGENT="${HTTP_USER_AGENT:-booktracker-import/0.1 (+https://booktracker.org)}"
+HTTP_USER_AGENT="${HTTP_USER_AGENT:-booktracker-import/0.1.2 (+https://booktracker.org)}"
 CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-15}"
 CURL_MAX_TIME="${CURL_MAX_TIME:-120}"
 export HTTP_USER_AGENT CURL_CONNECT_TIMEOUT CURL_MAX_TIME

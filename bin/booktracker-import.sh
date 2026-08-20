@@ -11,8 +11,26 @@
 #   2. Parses CLI options / command
 #   3. Dispatches to the corresponding library function
 #
-# Version:  0.1.1
-# Updated:  2026-08-20 15:18 CDT
+# CLI command          → library function
+# ---------------------|------------------
+# login                → login
+# get-inpx-fb2         → get_inpx_fb2
+# get-inpx-all         → get_inpx_all
+# get-dump             → get_dump
+# get-monthly-fb2      → get_monthly_fb2
+# get-monthly-usr      → get_monthly_usr
+# check                → (inline: is_valid_torrent / get_torrent_timestamp)
+# prune                → prune
+# history              → history
+# all                  → all
+#
+# Exit codes:
+#   0  success
+#   1  operational failure (network, missing topic, invalid torrent, …)
+#   2  usage error (unknown option/command, missing required argument)
+#
+# Version:  0.1.2
+# Updated:  2026-08-20 17:51 CDT
 # Requires: bash >= 4, curl, GNU grep, GNU date, coreutils
 #
 # Examples:
@@ -76,6 +94,11 @@ Options:
   -h, --help               Show this help
 
 Options may appear before or after the command (e.g. `all -f`).
+
+Exit codes:
+  0  success
+  1  operational failure
+  2  usage error
 
 Credentials: BOOKTRACKER_USERNAME / BOOKTRACKER_PASSWORD
   (environment variables or a gitignored .env in the project root).
@@ -157,7 +180,7 @@ main() {
             prune
             ;;
         history)
-            list_downloads
+            history
             ;;
         all)
             all "${pos[0]:-}"
