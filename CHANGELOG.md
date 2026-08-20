@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-20
+
+### Changed
+
+- `bin/booktracker-import.sh`:
+  - enable `set -o pipefail` (without `set -e`)
+  - centralize usage failures via `usage_error` (unknown option/command,
+    missing args) → exit code 2
+  - keep the script thin: load config → parse args → dispatch only
+- `lib/booktracker-import_functions.sh`:
+  - document pure / test-friendly helpers in the file header
+  - shell-style notes (quote expansions, `local`, return not exit, shellcheck)
+- Version headers set to **0.1.3** (Updated: 2026-08-20 18:46 CDT).
+
+## [0.1.2] - 2026-08-20
+
+### Changed
+
+- `bin/booktracker-import.sh` and `lib/booktracker-import_functions.sh`:
+  - clearer section layout and CLI → function mapping in the main script header
+  - rename `_retire_superseded` → `_archive_superseded`
+  - rename `list_downloads` → `history` (matches the CLI command `history`)
+  - extract shared `_get_by_topic` helper; `get_inpx_fb2`, `get_inpx_all`, and
+    `get_dump` are thin wrappers around it
+  - document exit codes (`0` success, `1` operational failure, `2` usage error)
+    in headers and `--help`
+  - `all` continues on failure and reports failed target names in the summary
+  - more consistent start / success / skip / fail log lines; `debug` logs forum
+    id, topic id, and download URL
+- Version headers set to **0.1.2** (Updated: 2026-08-20 17:51 CDT).
+- `config/config.sh`: version header; `HTTP_USER_AGENT` default bumped to `booktracker-import/0.1.2`.
+- No changes to staging scripts.
+
 ## [0.1.1] - 2026-08-20
 
 ### Changed
@@ -120,7 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verified live on 2026-08-14: a full `all -f` run resolved and downloaded all
   five release types successfully.
 
-[Unreleased]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/playfulpin/BookTracker-import/releases/tag/v0.1.0
-```

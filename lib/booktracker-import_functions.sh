@@ -15,7 +15,14 @@
 #                get_monthly_fb2  get_monthly_usr  all
 #   Housekeeping prune  history
 #
-# Private helpers are prefixed with a single underscore
+# Pure helpers (no network, no global mutation — preferred for unit tests)
+# ----------
+#   _html_to_text  _date_to_epoch  _torrent_name  _extract_torrent_link
+#   _torrent_stamp (reads a local file only)
+#   get_torrent_timestamp / is_valid_torrent / is_valid_timestamp
+#     (local file I/O + optional log side effects; still testable)
+#
+# # Private helpers are prefixed with a single underscore
 # (_curl, _get_by_topic, _download_and_verify, _archive_superseded, …).
 #
 # Configuration defaults live in config/config.sh. Values below are fallbacks
@@ -26,9 +33,11 @@
 #   1  operational failure
 #   2  bad input / usage (where applicable)
 #
-# Version:  0.1.2
-# Updated:  2026-08-20 17:51 CDT
+# Version:  0.1.3
+# Updated:  2026-08-20 18:46 CDT
 # Requires: bash >= 4, curl, GNU grep, GNU date, head, sed
+# Shell style: quote expansions; prefer local; return not exit in library;
+#   process substitution over cat|while; shellcheck-friendly.
 # =============================================================================
 
 # Guard against double-sourcing.
@@ -41,7 +50,7 @@ _BOOKTRACKER_FUNCTIONS_LOADED=1
 : "${BOOKTRACKER_BASE_URL:=https://booktracker.org}"
 : "${COOKIE_JAR:=${TMPDIR:-/tmp}/booktracker-cookies.txt}"
 : "${LOG_LEVEL:=info}"
-: "${HTTP_USER_AGENT:=booktracker-import/0.1}"
+: "${HTTP_USER_AGENT:=booktracker-import/0.1.2}"
 : "${CURL_CONNECT_TIMEOUT:=15}"
 : "${CURL_MAX_TIME:=120}"
 : "${DATA_DIR:=${PROJECT_ROOT:-.}/data}"
@@ -663,3 +672,4 @@ history() {
         return 0
     fi
 }
+```
