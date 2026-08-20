@@ -1,24 +1,35 @@
 #!/usr/bin/env bash
 # =============================================================================
-# booktracker-import — shared functions
+# booktracker-import_functions.sh
 #
-# Sourced by bin/booktracker-import.sh (and by the test suite).  Contains the
-# reusable building blocks:
+# Shared library for booktracker-import.
+# Sourced by bin/booktracker-import.sh and by the test suite.
 #
-#   logging          log, log_info, log_warn, log_error, debug
-#   session          login
-#   torrent          get_torrent_timestamp, is_valid_timestamp, is_valid_torrent
-#   downloads        get_inpx_fb2, get_inpx_all, get_dump,
-#                    get_monthly_fb2, get_monthly_usr
+# Public API
+# ----------
+#   Logging      log  log_info  log_warn  log_error  debug
+#   Session      login
+#   Inspection   get_torrent_timestamp  is_valid_timestamp  is_valid_torrent
+#   Discovery    get_forumid  get_topicid
+#   Downloads    get_inpx_fb2  get_inpx_all  get_dump
+#                get_monthly_fb2  get_monthly_usr  all
+#   Housekeeping prune  list_downloads
 #
-# Requires: bash >= 4, curl, grep, sed, date (GNU), head
+# Private helpers are prefixed with a single underscore
+# (_curl, _download_and_verify, …).
+#
+# Version:  0.1.1
+# Updated:  2026-08-20 15:18 CDT
+# Requires: bash >= 4, curl, GNU grep, GNU date, head, sed
 # =============================================================================
 
-# Allow being sourced multiple times without redefining everything.
+# Guard against double-sourcing.
 [[ -n "${_BOOKTRACKER_FUNCTIONS_LOADED:-}" ]] && return 0 2>/dev/null || true
 _BOOKTRACKER_FUNCTIONS_LOADED=1
 
-# Sensible fallbacks so the library is usable even if config.sh was not sourced.
+# ---------------------------------------------------------------------------
+# Sensible defaults (used when config.sh has not been sourced)
+# ---------------------------------------------------------------------------
 : "${BOOKTRACKER_BASE_URL:=https://booktracker.org}"
 : "${COOKIE_JAR:=${TMPDIR:-/tmp}/booktracker-cookies.txt}"
 : "${LOG_LEVEL:=info}"
@@ -46,6 +57,8 @@ _BOOKTRACKER_FUNCTIONS_LOADED=1
 # Logging
 # =============================================================================
 
+# _log_level_num <level>
+# Map a log level name to a numeric rank (debug=0 … error=3).
 _log_level_num() {
     case "${1:-info}" in
         debug) printf '0\n' ;;
@@ -57,7 +70,7 @@ _log_level_num() {
 }
 
 # log <level> <message...>
-# Emit a timestamped, leveled log line to stderr and (optionally) LOG_FILE.
+# Emit a timestamped, leveled line to stderr (and LOG_FILE when set).
 log() {
     local level="${1:-info}"; shift
     local msg="$*" ts cur threshold
@@ -73,20 +86,26 @@ log() {
     fi
 }
 
+# log_info <message...>
 log_info()  { log info  "$@"; }
+
+# log_warn <message...>
 log_warn()  { log warn  "$@"; }
+
+# log_error <message...>
 log_error() { log error "$@"; }
 
-# debug <message...> — only emitted when LOG_LEVEL=debug.
+# debug <message...>
+# Emitted only when LOG_LEVEL=debug.
 debug() { log debug "$@"; }
 
 # =============================================================================
 # HTTP helpers
 # =============================================================================
 
-# _curl [curl opts...] url
-# Every site request goes through this wrapper so the cookie jar, user agent
-# and timeouts stay consistent.
+# _curl [curl opts...] <url>
+# Route every site request through a consistent cookie jar, user-agent and
+# timeout settings.
 _curl() {
     curl -sS -L \
         --connect-timeout "${CURL_CONNECT_TIMEOUT}" \
@@ -96,6 +115,8 @@ _curl() {
         "$@"
 }
 
+# _http_get <url> [extra curl opts...]
+# Convenience wrapper for a simple GET.
 _http_get() {
     local url="$1"; shift
     _curl "$@" "$url"
@@ -105,7 +126,8 @@ _http_get() {
 # Session / login
 # =============================================================================
 
-# _is_logged_in — returns 0 when the stored session is authenticated.
+# _is_logged_in
+# Return 0 when the stored session cookie is authenticated.
 _is_logged_in() {
     local page
     page="$(_curl "$BOOKTRACKER_BASE_URL/index.php" 2>/dev/null)" || return 1
@@ -119,6 +141,7 @@ _is_logged_in() {
 
 # login [redirect]
 # Authenticate against booktracker.org and persist the session cookie.
+# Returns 0 on success.
 login() {
     local username password redirect err
     username="${BOOKTRACKER_USERNAME:-}"
@@ -160,12 +183,11 @@ login() {
 }
 
 # =============================================================================
-# Torrent file inspection
+# Torrent inspection
 # =============================================================================
 
-# get_torrent_timestamp <torrent_file>
-# Print the torrent's bencoded `creation date` (unix epoch) to stdout.
-# Returns 0 when the field is present, 1 otherwise.
+# get_torrent_timestamp <file>
+# Print the bencoded creation-date (unix epoch). Returns 1 if missing.
 get_torrent_timestamp() {
     local file="$1" raw ts
     [[ -f "$file" ]] || { log_error "torrent file not found: $file"; return 1; }
@@ -181,9 +203,8 @@ get_torrent_timestamp() {
     return 0
 }
 
-# is_valid_torrent <torrent_file>
-# Basic structural validation of a bencoded .torrent file.
-# Returns 0 when the file looks like a usable torrent, 1 otherwise.
+# is_valid_torrent <file>
+# Basic structural check of a bencoded .torrent. Returns 0 when usable.
 is_valid_torrent() {
     local file="$1" head
     [[ -f "$file" ]] || { log_error "torrent file not found: $file"; return 1; }
@@ -202,13 +223,8 @@ is_valid_torrent() {
 }
 
 # _date_to_epoch <date>
-# Normalize a date argument to unix epoch seconds.  Accepts:
-#   - unix epoch seconds (9+ digits)
-#   - YYYYMMDD (8 digits)
-#   - any GNU `date -d` string (e.g. "2026-07-01", "last month")
-#   - "" or "now" for the current time
-# Date strings are interpreted as UTC so that comparisons against torrent
-# `creation date` epochs are deterministic regardless of the local timezone.
+# Normalize a date argument to unix epoch seconds (UTC).
+# Accepts: epoch, YYYYMMDD, any GNU date -d string, or "" / "now".
 _date_to_epoch() {
     local d="$1" len
     case "$d" in
@@ -228,10 +244,8 @@ _date_to_epoch() {
     esac
 }
 
-# is_valid_timestamp <torrent_file> <reference_date>
-# Compare a torrent's creation timestamp to a reference date.
-# Returns 0 when the torrent timestamp is >= the reference date (i.e. the
-# torrent is not older than the reference), 1 when it is stale, 2 on bad input.
+# is_valid_timestamp <file> <reference_date>
+# Return 0 when the torrent's creation date is >= the reference date.
 is_valid_timestamp() {
     local file="$1" ref="${2:-}" tor_ts ref_ts
     if ! tor_ts="$(get_torrent_timestamp "$file")"; then
@@ -250,9 +264,8 @@ is_valid_timestamp() {
     return 1
 }
 
-# _torrent_stamp <torrent_file>
-# Print the torrent's creation date as YYYY-MM-DD (UTC), falling back to the
-# current date when the field is absent.  Used to build meaningful file names.
+# _torrent_stamp <file>
+# Print the torrent creation date as YYYY-MM-DD (UTC), falling back to today.
 _torrent_stamp() {
     local file="$1" ts stamp
     if ts="$(get_torrent_timestamp "$file" 2>/dev/null)"; then
@@ -266,9 +279,7 @@ _torrent_stamp() {
 # =============================================================================
 
 # _html_to_text <html>
-# Best-effort conversion of an HTML fragment to searchable plain text: strips
-# tags (including <wbr> soft line-breaks) and decodes the entities seen in
-# booktracker.org titles.
+# Strip tags and decode common entities so titles are searchable as plain text.
 _html_to_text() {
     printf '%s' "$1" \
         | sed -e 's/<[^>]*>//g' \
@@ -277,10 +288,7 @@ _html_to_text() {
 }
 
 # get_forumid <title>
-# Determine a forum's numeric id by searching the main index page for the forum
-# link whose (tag-stripped) text contains <title>.  Forum ids are not stable
-# across site updates, so they are always resolved from the live HTML.
-# Prints the id; returns 0 on success, 1 when not found.
+# Resolve a forum numeric id from the live index page by title substring.
 get_forumid() {
     local title="$1" html line fid text
     html="$(_http_get "$BOOKTRACKER_BASE_URL/index.php" 2>/dev/null)" || {
@@ -305,10 +313,7 @@ get_forumid() {
 }
 
 # get_topicid <forum_id> <title>
-# Determine a topic's numeric id by searching the forum listing for the topic
-# link whose (tag-stripped) title contains <title>.  Topic ids change whenever
-# a new release is posted, so they are always resolved from the live HTML.
-# Prints the id; returns 0 on success, 1 when not found.
+# Resolve a topic numeric id from the live forum listing by title substring.
 get_topicid() {
     local forum_id="$1" title="$2" html line tid text
     html="$(_http_get "$BOOKTRACKER_BASE_URL/viewforum.php?f=$forum_id" 2>/dev/null)" || {
@@ -332,10 +337,11 @@ get_topicid() {
     return 1
 }
 
-# Russian month names (nominative), indexed 1..12.
+# Russian month names (nominative), indexed 0..11.
 _RU_MONTHS=( январь февраль март апрель май июнь июль август сентябрь октябрь ноябрь декабрь )
 
-# _monthly_target — print "YEAR MM RU_NAME" for the target (previous) month.
+# _monthly_target
+# Print "YEAR MM RU_NAME" for the target month (MONTH_OFFSET months ago).
 _monthly_target() {
     local ym year month
     ym="$(date -d "$(date +%Y-%m-01) -${MONTH_OFFSET} month" +%Y-%m 2>/dev/null)" || {
@@ -349,14 +355,11 @@ _monthly_target() {
 }
 
 # =============================================================================
-# Downloading
+# Download helpers (private)
 # =============================================================================
 
 # _extract_torrent_link <html>
 # Find the .torrent download link on a topic page and print an absolute URL.
-# booktracker.org serves torrents from `download.php?id=<attach_id>` inside the
-# anchor labeled "Скачать .torrent" (helper attachments use a different, named
-# anchor).  Other TorrentPier schemes (dl.php?id=, dl.php?t=) are also handled.
 _extract_torrent_link() {
     local html="$1" link
 
@@ -383,15 +386,14 @@ _extract_torrent_link() {
 }
 
 # _torrent_name <type> <stamp>
-# Build the meaningful file name: `<prefix>-<type>-<stamp>.torrent`.
+# Build the meaningful file name: <prefix>-<type>-<stamp>.torrent.
 _torrent_name() {
     local type="${1:-torrent}" stamp="${2:-}"
     printf '%s-%s-%s.torrent\n' "$TORRENT_NAME_PREFIX" "$type" "$stamp"
 }
 
 # _retire_superseded <type> <new_file>
-# Move (or delete) any other same-type torrent in the new file's directory so
-# the active directory keeps only the latest file per type.
+# Move (or delete) any other same-type torrent so only the latest remains active.
 _retire_superseded() {
     local type="$1" new_file="$2" dir f
     dir="$(dirname "$new_file")"
@@ -416,7 +418,8 @@ _retire_superseded() {
     return 0
 }
 
-# _prune_dir <dir> <days> — delete *.torrent files older than <days> (0 = off).
+# _prune_dir <dir> <days>
+# Delete *.torrent files older than <days> (0 = disabled).
 _prune_dir() {
     local dir="$1" days="$2" f
     (( days > 0 )) || return 0
@@ -431,19 +434,8 @@ _prune_dir() {
         done
 }
 
-# prune — remove archived torrents older than TORRENT_RETENTION_DAYS.
-prune() {
-    if (( TORRENT_RETENTION_DAYS <= 0 )); then
-        log_info "retention disabled (TORRENT_RETENTION_DAYS=$TORRENT_RETENTION_DAYS); nothing to prune"
-        return 0
-    fi
-    log_info "pruning archived torrents older than $TORRENT_RETENTION_DAYS days"
-    _prune_dir "$ARCHIVE_DIR" "$TORRENT_RETENTION_DAYS"
-}
-
 # _record_download <type> <topic> <stamp> <url> <filename>
-# Append one row to the download state file (TSV):
-#   downloaded_at, type, topic, stamp, url, filename
+# Append one row to the download state file (TSV).
 _record_download() {
     local type="$1" topic="$2" stamp="$3" url="$4" filename="$5" ts
     mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null || true
@@ -455,16 +447,6 @@ _record_download() {
     log_info "recorded download: $type topic=$topic stamp=$stamp"
 }
 
-# list_downloads — print the download state file.
-list_downloads() {
-    if [[ -f "$STATE_FILE" ]]; then
-        cat "$STATE_FILE"
-    else
-        log_info "no download history yet ($STATE_FILE)"
-        return 0
-    fi
-}
-
 # _already_downloaded <type> <url>
 # Return 0 when the state file already records this type + download url.
 _already_downloaded() {
@@ -474,10 +456,8 @@ _already_downloaded() {
 }
 
 # _download_and_verify <topic_id> <output_dir> [reference_date] [type] [stamp]
-# Fetch a topic, extract its .torrent link, download it and (optionally)
-# validate the torrent structure and timestamp.  The saved file is named
-# meaningfully: `<prefix>-<type>-<stamp>.torrent` (stamp defaults to the
-# torrent's creation date).  Superseded same-type files are then retired.
+# Fetch a topic, extract its .torrent link, download and optionally validate.
+# The saved file is named <prefix>-<type>-<stamp>.torrent.
 _download_and_verify() {
     local tid="$1" out_dir="$2" ref_date="${3:-}" type="${4:-torrent}" stamp="${5:-}"
     local html dl_url tmp_file out_file
@@ -546,7 +526,12 @@ _download_and_verify() {
     return 0
 }
 
-# get_inpx_fb2 [output_dir] — INPX для библиотеки Flibusta (только FB2)
+# =============================================================================
+# Public download commands
+# =============================================================================
+
+# get_inpx_fb2 [output_dir]
+# Download the FB2-only INPX index torrent.
 get_inpx_fb2() {
     local out_dir="${1:-$TORRENT_DIR}" forum tid
     forum="$(get_forumid "$FORUM_FULL_COLLECTIONS_TITLE")" || return 1
@@ -555,7 +540,8 @@ get_inpx_fb2() {
     _download_and_verify "$tid" "$out_dir" "" "inpx-fb2"
 }
 
-# get_inpx_all [output_dir] — inpx для библиотеки Flibusta "расширенный"
+# get_inpx_all [output_dir]
+# Download the full ("расширенный") INPX index torrent.
 get_inpx_all() {
     local out_dir="${1:-$TORRENT_DIR}" forum tid
     forum="$(get_forumid "$FORUM_FULL_COLLECTIONS_TITLE")" || return 1
@@ -564,7 +550,8 @@ get_inpx_all() {
     _download_and_verify "$tid" "$out_dir" "" "inpx-all"
 }
 
-# get_dump [output_dir] — Дампы базы данных библиотеки Флибуста
+# get_dump [output_dir]
+# Download the Flibusta database-dump torrent.
 get_dump() {
     local out_dir="${1:-$TORRENT_DIR}" forum tid
     forum="$(get_forumid "$FORUM_FULL_COLLECTIONS_TITLE")" || return 1
@@ -573,7 +560,8 @@ get_dump() {
     _download_and_verify "$tid" "$out_dir" "" "dump"
 }
 
-# get_monthly_fb2 [output_dir] — monthly FB2 archive (previous month)
+# get_monthly_fb2 [output_dir]
+# Discover and download the previous month's FB2 archive torrent.
 get_monthly_fb2() {
     local out_dir="${1:-$TORRENT_DIR}" forum tid year month ru title ref_date
     read -r year month ru <<< "$(_monthly_target)" || return 1
@@ -588,7 +576,8 @@ get_monthly_fb2() {
     _download_and_verify "$tid" "$out_dir" "$ref_date" "monthly-fb2" "${year}-${month}"
 }
 
-# get_monthly_usr [output_dir] — monthly non-FB2 archive (previous month)
+# get_monthly_usr [output_dir]
+# Discover and download the previous month's non-FB2 archive torrent.
 get_monthly_usr() {
     local out_dir="${1:-$TORRENT_DIR}" forum tid year month ru title ref_date
     read -r year month ru <<< "$(_monthly_target)" || return 1
@@ -603,9 +592,8 @@ get_monthly_usr() {
     _download_and_verify "$tid" "$out_dir" "$ref_date" "monthly-usr" "${year}-${month}"
 }
 
-# all [output_dir] — run every get-* target in sequence, skipping anything
-# already downloaded.  Continues past failures and returns non-zero if any
-# target failed.
+# all [output_dir]
+# Run every get-* target; continue on failure; return non-zero if any failed.
 all() {
     local out_dir="${1:-}" ok=0 fail=0
     local -a targets=(get_inpx_fb2 get_inpx_all get_dump get_monthly_fb2 get_monthly_usr)
@@ -619,4 +607,30 @@ all() {
     done
     log_info "finished: $ok ok, $fail failed"
     return $(( fail > 0 ))
+}
+
+# =============================================================================
+# Housekeeping
+# =============================================================================
+
+# prune
+# Delete archived torrents older than TORRENT_RETENTION_DAYS (0 = disabled).
+prune() {
+    if (( TORRENT_RETENTION_DAYS <= 0 )); then
+        log_info "retention disabled (TORRENT_RETENTION_DAYS=$TORRENT_RETENTION_DAYS); nothing to prune"
+        return 0
+    fi
+    log_info "pruning archived torrents older than $TORRENT_RETENTION_DAYS days"
+    _prune_dir "$ARCHIVE_DIR" "$TORRENT_RETENTION_DAYS"
+}
+
+# list_downloads
+# Print the download history TSV (or a short message when empty).
+list_downloads() {
+    if [[ -f "$STATE_FILE" ]]; then
+        cat "$STATE_FILE"
+    else
+        log_info "no download history yet ($STATE_FILE)"
+        return 0
+    fi
 }

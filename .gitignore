@@ -6,6 +6,7 @@
 *.env
 secrets/
 credentials.txt
+commit_msg_*
 *.pem
 *.key
 
