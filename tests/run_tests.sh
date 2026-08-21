@@ -2,7 +2,8 @@
 # =============================================================================
 # booktracker-import — test suite
 #
-# Exercises the pure (network-free) functions.  Run with:
+# Exercises the pure (network-free) functions of booktracker-import and
+# booktracker-extract, plus the CLI argument parsing of both scripts. Run with:
 #     bash tests/run_tests.sh
 # =============================================================================
 
@@ -22,7 +23,7 @@ export DRY_RUN=0
 
 source "$PROJECT_ROOT/config/config.sh"
 source "$PROJECT_ROOT/lib/booktracker-import_functions.sh"
-source "$PROJECT_ROOT/lib/booktracker-stage_functions.sh"
+source "$PROJECT_ROOT/lib/booktracker-extract_functions.sh"
 
 # --- Tiny assertion helpers -------------------------------------------------
 PASS=0
@@ -232,7 +233,7 @@ ARCHIVE_DIR="$ARCH_DIR"
 ARCHIVE_TORRENTS=1
 touch "$RET_DIR/flibusta-dump-2026-07-01.torrent"
 touch "$RET_DIR/flibusta-dump-2026-08-01.torrent"
-_retire_superseded "dump" "$RET_DIR/flibusta-dump-2026-08-01.torrent" 2>/dev/null
+_archive_superseded "dump" "$RET_DIR/flibusta-dump-2026-08-01.torrent" 2>/dev/null
 assert_ok "retire archives the superseded torrent" \
     test -f "$ARCH_DIR/flibusta-dump-2026-07-01.torrent"
 assert_ok "retire keeps the new torrent" \
@@ -244,7 +245,7 @@ assert_fail "retire removes the superseded torrent from the active dir" \
 ARCHIVE_TORRENTS=0
 touch "$RET_DIR/flibusta-inpx-fb2-2026-07-01.torrent"
 touch "$RET_DIR/flibusta-inpx-fb2-2026-08-01.torrent"
-_retire_superseded "inpx-fb2" "$RET_DIR/flibusta-inpx-fb2-2026-08-01.torrent" 2>/dev/null
+_archive_superseded "inpx-fb2" "$RET_DIR/flibusta-inpx-fb2-2026-08-01.torrent" 2>/dev/null
 assert_fail "retire deletes superseded when ARCHIVE_TORRENTS=0" \
     test -f "$RET_DIR/flibusta-inpx-fb2-2026-07-01.torrent"
 assert_ok "retire (delete mode) keeps the new torrent" \
@@ -252,7 +253,7 @@ assert_ok "retire (delete mode) keeps the new torrent" \
 
 # Other types must not be touched.
 touch "$RET_DIR/flibusta-monthly-fb2-2026-07.torrent"
-_retire_superseded "dump" "$RET_DIR/flibusta-dump-2026-08-01.torrent" 2>/dev/null
+_archive_superseded "dump" "$RET_DIR/flibusta-dump-2026-08-01.torrent" 2>/dev/null
 assert_ok "retire leaves other types untouched" \
     test -f "$RET_DIR/flibusta-monthly-fb2-2026-07.torrent"
 
@@ -329,32 +330,52 @@ cli_rc="$(bash "$PROJECT_ROOT/bin/booktracker-import.sh" check -f "$FIXTURE_DIR/
 assert_eq "CLI: -f before 'check' still works" "0" "$cli_rc"
 
 # =============================================================================
-# Staging (booktracker-stage_functions.sh)
+# Extraction (booktracker-extract_functions.sh)
 # =============================================================================
-assert_eq "stage_type_from_name parses dump" \
+assert_eq "extract_type_from_name parses dump" \
     "dump" \
-    "$(stage_type_from_name 'flibusta-dump-2026-08-01.torrent')"
-assert_eq "stage_type_from_name parses inpx-fb2" \
+    "$(extract_type_from_name 'flibusta-dump-2026-08-01.torrent')"
+assert_eq "extract_type_from_name parses inpx-fb2" \
     "inpx-fb2" \
-    "$(stage_type_from_name 'flibusta-inpx-fb2-2026-08-01.torrent')"
-assert_eq "stage_type_from_name parses inpx-all" \
+    "$(extract_type_from_name 'flibusta-inpx-fb2-2026-08-01.torrent')"
+assert_eq "extract_type_from_name parses inpx-all" \
     "inpx-all" \
-    "$(stage_type_from_name 'flibusta-inpx-all-2026-08-01.torrent')"
-assert_eq "stage_type_from_name parses monthly-fb2" \
+    "$(extract_type_from_name 'flibusta-inpx-all-2026-08-01.torrent')"
+assert_eq "extract_type_from_name parses monthly-fb2" \
     "monthly-fb2" \
-    "$(stage_type_from_name 'flibusta-monthly-fb2-2026-07.torrent')"
-assert_eq "stage_type_from_name parses monthly-usr" \
+    "$(extract_type_from_name 'flibusta-monthly-fb2-2026-07.torrent')"
+assert_eq "extract_type_from_name parses monthly-usr" \
     "monthly-usr" \
-    "$(stage_type_from_name 'flibusta-monthly-usr-2026-07.torrent')"
-assert_fail "stage_type_from_name rejects an unknown type" \
-    stage_type_from_name 'flibusta-foo-2026-08-01.torrent'
+    "$(extract_type_from_name 'flibusta-monthly-usr-2026-07.torrent')"
+assert_fail "extract_type_from_name rejects an unknown type" \
+    extract_type_from_name 'flibusta-foo-2026-08-01.torrent'
 
-assert_eq "stage_destination maps inpx-fb2" "inpx" "$(stage_destination inpx-fb2)"
-assert_eq "stage_destination maps inpx-all" "inpx" "$(stage_destination inpx-all)"
-assert_eq "stage_destination maps dump" "FlibustaSQL" "$(stage_destination dump)"
-assert_eq "stage_destination maps monthly-fb2" "book_archives" "$(stage_destination monthly-fb2)"
-assert_eq "stage_destination maps monthly-usr" "book_archives" "$(stage_destination monthly-usr)"
-assert_fail "stage_destination rejects an unknown type" stage_destination foo
+assert_eq "extract_destination maps inpx-fb2" "inpx" "$(extract_destination inpx-fb2)"
+assert_eq "extract_destination maps inpx-all" "inpx" "$(extract_destination inpx-all)"
+assert_eq "extract_destination maps dump" "FlibustaSQL" "$(extract_destination dump)"
+assert_eq "extract_destination maps monthly-fb2" "book_archives" "$(extract_destination monthly-fb2)"
+assert_eq "extract_destination maps monthly-usr" "book_archives" "$(extract_destination monthly-usr)"
+assert_fail "extract_destination rejects an unknown type" extract_destination foo
+
+# Output basename rules (inpx-fb2 uses a canonical local name).
+FB2_INPX_NAME="$(extract_inpx_fb2_output_name)"
+assert_ok "extract_inpx_fb2_output_name returns a canonical name" \
+    test -n "$FB2_INPX_NAME"
+assert_eq "extract_inpx_fb2_output_name matches the expected pattern" \
+    "1" \
+    "$(printf '%s' "$FB2_INPX_NAME" | grep -cE '^flibusta_fb2_local-[0-9]{4}-[0-9]{2}-01_original\.inpx$')"
+assert_eq "extract_output_basename (inpx-fb2) uses the canonical name" \
+    "$FB2_INPX_NAME" \
+    "$(extract_output_basename inpx-fb2 'fb2.Flibusta.Net.inpx')"
+assert_eq "extract_output_basename (dump) keeps the torrent basename" \
+    "lib.libbook.sql.gz" \
+    "$(extract_output_basename dump './lib.libbook.sql.gz')"
+assert_eq "extract_output_basename (inpx-all) keeps the torrent basename" \
+    "lib.inpx" \
+    "$(extract_output_basename inpx-all 'lib.inpx')"
+assert_eq "extract_output_basename (monthly) keeps the torrent basename" \
+    "books.fb2.7z" \
+    "$(extract_output_basename monthly-fb2 './books.fb2.7z')"
 
 # Dump file list — mirrors the real FlibustaSQL torrent inspected 2026-08-14.
 ARIA2_DUMP_FILES='Files:
@@ -381,16 +402,16 @@ idx|path/length
  19|lib.md5.txt.gz
  20|lib.reviews.sql.gz'
 
-assert_eq "stage_select_indexes (dump) selects only allowed files" \
+assert_eq "extract_select_indexes (dump) selects only allowed files" \
     "7,8,9,10,11,12,13,14,15,16,17,18" \
-    "$(stage_select_indexes dump <<< "$ARIA2_DUMP_FILES")"
+    "$(extract_select_indexes dump <<< "$ARIA2_DUMP_FILES")"
 
-assert_ok "stage_is_allowed (dump) allows lib.libbook.sql.gz" \
-    stage_is_allowed dump "lib.libbook.sql.gz"
-assert_fail "stage_is_allowed (dump) rejects lib.md5.txt.gz" \
-    stage_is_allowed dump "lib.md5.txt.gz"
-assert_fail "stage_is_allowed (dump) rejects a .zip archive" \
-    stage_is_allowed dump "lib.a.attached.zip"
+assert_ok "extract_is_allowed (dump) allows lib.libbook.sql.gz" \
+    extract_is_allowed dump "lib.libbook.sql.gz"
+assert_fail "extract_is_allowed (dump) rejects lib.md5.txt.gz" \
+    extract_is_allowed dump "lib.md5.txt.gz"
+assert_fail "extract_is_allowed (dump) rejects a .zip archive" \
+    extract_is_allowed dump "lib.a.attached.zip"
 
 ARIA2_INPX_FILES='Files:
 idx|path/length
@@ -399,22 +420,22 @@ idx|path/length
   2|books.fb2.7z
   3|books.epub.7z'
 
-assert_eq "stage_select_indexes (inpx-fb2) selects only *.inpx" \
+assert_eq "extract_select_indexes (inpx-fb2) selects only *.inpx" \
     "1" \
-    "$(stage_select_indexes inpx-fb2 <<< "$ARIA2_INPX_FILES")"
-assert_eq "stage_select_indexes (inpx-all) selects only *.inpx" \
+    "$(extract_select_indexes inpx-fb2 <<< "$ARIA2_INPX_FILES")"
+assert_eq "extract_select_indexes (inpx-all) selects only *.inpx" \
     "1" \
-    "$(stage_select_indexes inpx-all <<< "$ARIA2_INPX_FILES")"
-assert_ok "stage_is_allowed (inpx-fb2) allows .inpx" \
-    stage_is_allowed inpx-fb2 "lib.inpx"
-assert_fail "stage_is_allowed (inpx-fb2) rejects .7z" \
-    stage_is_allowed inpx-fb2 "books.7z"
-assert_eq "stage_select_indexes (full) selects nothing (download all)" \
+    "$(extract_select_indexes inpx-all <<< "$ARIA2_INPX_FILES")"
+assert_ok "extract_is_allowed (inpx-fb2) allows .inpx" \
+    extract_is_allowed inpx-fb2 "lib.inpx"
+assert_fail "extract_is_allowed (inpx-fb2) rejects .7z" \
+    extract_is_allowed inpx-fb2 "books.7z"
+assert_eq "extract_select_indexes (full) selects nothing (download all)" \
     "" \
-    "$(stage_select_indexes monthly-fb2 <<< "$ARIA2_INPX_FILES")"
+    "$(extract_select_indexes monthly-fb2 <<< "$ARIA2_INPX_FILES")"
 
-# stage_download_files returns the download set as idx|path lines.
-assert_eq "stage_download_files (dump) lists only allowed files" \
+# extract_download_files returns the download set as idx|path lines.
+assert_eq "extract_download_files (dump) lists only allowed files" \
     "7|lib.libavtor.sql.gz
 8|lib.libavtorname.sql.gz
 9|lib.libbook.sql.gz
@@ -427,42 +448,42 @@ assert_eq "stage_download_files (dump) lists only allowed files" \
 16|lib.libseq.sql.gz
 17|lib.libseqname.sql.gz
 18|lib.libtranslator.sql.gz" \
-    "$(stage_download_files dump <<< "$ARIA2_DUMP_FILES")"
-assert_eq "stage_download_files (inpx-fb2) lists only the .inpx" \
+    "$(extract_download_files dump <<< "$ARIA2_DUMP_FILES")"
+assert_eq "extract_download_files (inpx-fb2) lists only the .inpx" \
     "1|lib.inpx" \
-    "$(stage_download_files inpx-fb2 <<< "$ARIA2_INPX_FILES")"
-assert_eq "stage_download_files (full) lists every file" \
+    "$(extract_download_files inpx-fb2 <<< "$ARIA2_INPX_FILES")"
+assert_eq "extract_download_files (full) lists every file" \
     "1|lib.inpx
 2|books.fb2.7z
 3|books.epub.7z" \
-    "$(stage_download_files monthly-fb2 <<< "$ARIA2_INPX_FILES")"
+    "$(extract_download_files monthly-fb2 <<< "$ARIA2_INPX_FILES")"
 
-# stage_sql_destination + size helpers.
-assert_eq "stage_sql_destination returns the decompress folder" \
+# extract_sql_destination + size helpers.
+assert_eq "extract_sql_destination returns the decompress folder" \
     "mysql_feeds" \
-    "$(stage_sql_destination)"
+    "$(extract_sql_destination)"
 
-# stage_torrent_name + stage_stale_dir (stale-folder safeguard).
-assert_eq "stage_torrent_name extracts the torrent Name" \
+# extract_torrent_name + extract_stale_dir (stale-folder safeguard).
+assert_eq "extract_torrent_name extracts the torrent Name" \
     "FlibustaSQL" \
-    "$(stage_torrent_name <<< $'Files:\nName: FlibustaSQL\nidx|path/length')"
-assert_eq "stage_torrent_name returns nothing when Name is absent" \
+    "$(extract_torrent_name <<< $'Files:\nName: FlibustaSQL\nidx|path/length')"
+assert_eq "extract_torrent_name returns nothing when Name is absent" \
     "" \
-    "$(stage_torrent_name <<< $'Files:\nidx|path/length')"
-assert_eq "stage_torrent_name trims trailing whitespace and CR" \
+    "$(extract_torrent_name <<< $'Files:\nidx|path/length')"
+assert_eq "extract_torrent_name trims trailing whitespace and CR" \
     "FlibustaSQL" \
-    "$(stage_torrent_name <<< $'Name: FlibustaSQL  \r')"
+    "$(extract_torrent_name <<< $'Name: FlibustaSQL  \r')"
 
 mkdir -p "$TMPDIR_TEST/stdir/FlibustaSQL"
-assert_eq "stage_stale_dir finds a stale torrent-named dir" \
+assert_eq "extract_stale_dir finds a stale torrent-named dir" \
     "$TMPDIR_TEST/stdir/FlibustaSQL" \
-    "$(stage_stale_dir "$TMPDIR_TEST/stdir" 'FlibustaSQL')"
-assert_fail "stage_stale_dir misses an absent dir" \
-    stage_stale_dir "$TMPDIR_TEST/stdir" 'Nope'
-assert_fail "stage_stale_dir rejects a path-traversal name" \
-    stage_stale_dir "$TMPDIR_TEST/stdir" '../etc'
-assert_fail "stage_stale_dir rejects an empty name" \
-    stage_stale_dir "$TMPDIR_TEST/stdir" ''
+    "$(extract_stale_dir "$TMPDIR_TEST/stdir" 'FlibustaSQL')"
+assert_fail "extract_stale_dir misses an absent dir" \
+    extract_stale_dir "$TMPDIR_TEST/stdir" 'Nope'
+assert_fail "extract_stale_dir rejects a path-traversal name" \
+    extract_stale_dir "$TMPDIR_TEST/stdir" '../etc'
+assert_fail "extract_stale_dir rejects an empty name" \
+    extract_stale_dir "$TMPDIR_TEST/stdir" ''
 
 ARIA2_SIZED_FILES='Files:
 idx|path/length
@@ -474,62 +495,62 @@ idx|path/length
   3|./books.epub.7z
    |5.0KiB (5,120)'
 
-assert_eq "stage_total_size (inpx-fb2) sums only allowed files" \
+assert_eq "extract_total_size (inpx-fb2) sums only allowed files" \
     "100" \
-    "$(stage_total_size inpx-fb2 <<< "$ARIA2_SIZED_FILES")"
-assert_eq "stage_total_size (full) sums every file" \
+    "$(extract_total_size inpx-fb2 <<< "$ARIA2_SIZED_FILES")"
+assert_eq "extract_total_size (full) sums every file" \
     "5520" \
-    "$(stage_total_size monthly-fb2 <<< "$ARIA2_SIZED_FILES")"
-assert_eq "stage_total_size uses exact parenthesized bytes" \
+    "$(extract_total_size monthly-fb2 <<< "$ARIA2_SIZED_FILES")"
+assert_eq "extract_total_size uses exact parenthesized bytes" \
     "96397659" \
-    "$(stage_total_size inpx-fb2 <<< 'idx|path/length
+    "$(extract_total_size inpx-fb2 <<< 'idx|path/length
 ===+===========
   1|./lib.inpx
    |91MiB (96,397,659)')"
-assert_eq "stage_bytes_from_human converts bytes" \
+assert_eq "extract_bytes_from_human converts bytes" \
     "100" \
-    "$(stage_bytes_from_human '100B')"
-assert_eq "stage_bytes_from_human converts KiB" \
+    "$(extract_bytes_from_human '100B')"
+assert_eq "extract_bytes_from_human converts KiB" \
     "5120" \
-    "$(stage_bytes_from_human '5.0KiB')"
-assert_eq "stage_bytes_from_human converts MiB" \
+    "$(extract_bytes_from_human '5.0KiB')"
+assert_eq "extract_bytes_from_human converts MiB" \
     "1048576" \
-    "$(stage_bytes_from_human '1.0MiB')"
-assert_eq "stage_bytes_from_human converts GiB" \
+    "$(extract_bytes_from_human '1.0MiB')"
+assert_eq "extract_bytes_from_human converts GiB" \
     "1073741824" \
-    "$(stage_bytes_from_human '1.0GiB')"
-assert_eq "stage_bytes_from_human returns 0 for junk" \
+    "$(extract_bytes_from_human '1.0GiB')"
+assert_eq "extract_bytes_from_human returns 0 for junk" \
     "0" \
-    "$(stage_bytes_from_human 'nope')"
-assert_eq "stage_human_size formats bytes" \
+    "$(extract_bytes_from_human 'nope')"
+assert_eq "extract_human_size formats bytes" \
     "1.0KiB" \
-    "$(stage_human_size 1024)"
-assert_eq "stage_human_size formats a large value" \
+    "$(extract_human_size 1024)"
+assert_eq "extract_human_size formats a large value" \
     "129.5MiB" \
-    "$(stage_human_size 135805014)"
+    "$(extract_human_size 135805014)"
 
-# Staging state file (skip logic).
+# Extract state file (skip logic).
 STAGED_STATE_FILE="$TMPDIR_TEST/staged.tsv"
-stage_record dump "flibusta-dump-2026-08-01.torrent" "2026-08-01" \
-    "FlibustaSQL" "lib.libbook.sql,lib.libavtor.sql" 2>/dev/null
-assert_ok "stage_is_done finds a recorded torrent" \
-    stage_is_done "flibusta-dump-2026-08-01.torrent" "$STAGED_STATE_FILE"
-assert_fail "stage_is_done misses an unrecorded torrent" \
-    stage_is_done "flibusta-inpx-fb2-2026-08-01.torrent" "$STAGED_STATE_FILE"
-assert_fail "stage_is_done returns false without a state file" \
-    stage_is_done "flibusta-dump-2026-08-01.torrent" "$TMPDIR_TEST/nonexistent-staged.tsv"
+extract_record dump "flibusta-dump-2026-08-01.torrent" "2026-08-01" \
+    "mysql_feeds" "lib.libbook.sql,lib.libavtor.sql" 2>/dev/null
+assert_ok "extract_is_done finds a recorded torrent" \
+    extract_is_done "flibusta-dump-2026-08-01.torrent" "$STAGED_STATE_FILE"
+assert_fail "extract_is_done misses an unrecorded torrent" \
+    extract_is_done "flibusta-inpx-fb2-2026-08-01.torrent" "$STAGED_STATE_FILE"
+assert_fail "extract_is_done returns false without a state file" \
+    extract_is_done "flibusta-dump-2026-08-01.torrent" "$TMPDIR_TEST/nonexistent-staged.tsv"
 
 # =============================================================================
-# Staging CLI (bin/booktracker-stage.sh)
+# Extraction CLI (bin/booktracker-extract.sh)
 # =============================================================================
-stage_rc="$(bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --help >/dev/null 2>&1; echo $?)"
-assert_eq "stage: --help exits 0" "0" "$stage_rc"
+extract_rc="$(bash "$PROJECT_ROOT/bin/booktracker-extract.sh" --help >/dev/null 2>&1; echo $?)"
+assert_eq "extract: --help exits 0" "0" "$extract_rc"
 
-stage_rc="$(STAGING_DIR=relative/path BOOKTRACKER_NO_ENV=1 bash "$PROJECT_ROOT/bin/booktracker-stage.sh" >/dev/null 2>&1; echo $?)"
-assert_eq "stage: relative STAGING_DIR exits non-zero" "2" "$stage_rc"
+extract_rc="$(STAGING_DIR=relative/path BOOKTRACKER_NO_ENV=1 bash "$PROJECT_ROOT/bin/booktracker-extract.sh" >/dev/null 2>&1; echo $?)"
+assert_eq "extract: relative STAGING_DIR exits non-zero" "2" "$extract_rc"
 
-stage_rc="$(STAGING_DIR=/tmp bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --bogus >/dev/null 2>&1; echo $?)"
-assert_eq "stage: unknown option exits non-zero" "2" "$stage_rc"
+extract_rc="$(STAGING_DIR=/tmp bash "$PROJECT_ROOT/bin/booktracker-extract.sh" --bogus >/dev/null 2>&1; echo $?)"
+assert_eq "extract: unknown option exits non-zero" "2" "$extract_rc"
 
 # Mock aria2c: --show-files lists files (with sizes) per torrent type; download
 # "creates" the selected files via --index-out.  A mock gzip decompresses.
@@ -582,86 +603,107 @@ exit 0
 EOF
 chmod +x "$MOCK_BIN/gzip"
 
-STAGE_DIR_TEST="$TMPDIR_TEST/staging"
-STAGE_ENV=(PATH="$MOCK_BIN:$PATH" STAGING_DIR="$STAGE_DIR_TEST" \
+EXTRACT_DIR_TEST="$TMPDIR_TEST/staging"
+EXTRACT_ENV=(PATH="$MOCK_BIN:$PATH" STAGING_DIR="$EXTRACT_DIR_TEST" \
     BOOKTRACKER_NO_ENV=1 \
     STAGED_STATE_FILE="$TMPDIR_TEST/staged-cli.tsv" \
-    TORRENT_DIR="$TMPDIR_TEST/torrents" ARCHIVE_DIR="$TMPDIR_TEST/stage-archive")
+    TORRENT_DIR="$TMPDIR_TEST/torrents" ARCHIVE_DIR="$TMPDIR_TEST/extract-archive")
 
 # Dry run: builds the aria2c command with per-file selection.
 touch "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent"
-stage_out="$(env "${STAGE_ENV[@]}" \
-    bash "$PROJECT_ROOT/bin/booktracker-stage.sh" -n "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent" 2>&1)"
-stage_rc=$?
-assert_eq "stage: dry-run exits 0" "0" "$stage_rc"
-assert_eq "stage: dry-run builds an aria2c command" "1" \
-    "$(printf '%s' "$stage_out" | grep -c 'aria2c')"
-assert_eq "stage: dry-run selects only .inpx" "1" \
-    "$(printf '%s' "$stage_out" | grep -c -- '--select-file=1')"
-assert_eq "stage: dry-run pins the .inpx to its basename" "1" \
-    "$(printf '%s' "$stage_out" | grep -c -- '--index-out=1=lib.inpx')"
-assert_eq "stage: dry-run shows the staged file name" "1" \
-    "$(printf '%s' "$stage_out" | grep -c 'files=lib.inpx')"
-assert_eq "stage: dry-run shows the total download size" "1" \
-    "$(printf '%s' "$stage_out" | grep -c 'total')"
-assert_eq "stage: dry-run enables DHT" "1" \
-    "$(printf '%s' "$stage_out" | grep -c -- '--enable-dht=true')"
-assert_eq "stage: dry-run enables peer exchange" "1" \
-    "$(printf '%s' "$stage_out" | grep -c -- '--enable-peer-exchange=true')"
-assert_eq "stage: dry-run announces fallback trackers" "1" \
-    "$(printf '%s' "$stage_out" | grep -c -- '--bt-tracker=')"
-assert_fail "stage: dry-run does not create the staging directory" \
-    test -e "$STAGE_DIR_TEST"
+extract_out="$(env "${EXTRACT_ENV[@]}" \
+    bash "$PROJECT_ROOT/bin/booktracker-extract.sh" -n "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent" 2>&1)"
+extract_rc=$?
+assert_eq "extract: dry-run exits 0" "0" "$extract_rc"
+assert_eq "extract: dry-run builds an aria2c command" "1" \
+    "$(printf '%s' "$extract_out" | grep -c 'aria2c')"
+assert_eq "extract: dry-run selects only .inpx" "1" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--select-file=1')"
+assert_eq "extract: dry-run pins the .inpx to its basename" "1" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--index-out=1=lib.inpx')"
+assert_eq "extract: dry-run shows the extracted file name" "1" \
+    "$(printf '%s' "$extract_out" | grep -c 'files=lib.inpx')"
+assert_eq "extract: dry-run shows the total download size" "1" \
+    "$(printf '%s' "$extract_out" | grep -c 'total')"
+assert_eq "extract: dry-run enables DHT" "1" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--enable-dht=true')"
+assert_eq "extract: dry-run enables peer exchange" "1" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--enable-peer-exchange=true')"
+assert_eq "extract: dry-run tunes peer limits" "1" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--bt-max-peers=150')"
+assert_eq "extract: dry-run tunes open-file limits" "1" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--bt-max-open-files=200')"
+assert_eq "extract: dry-run disables preallocation" "1" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--file-allocation=none')"
+assert_eq "extract: dry-run allows overwrite" "1" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--allow-overwrite=true')"
+assert_eq "extract: dry-run announces fallback trackers" "1" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--bt-tracker=')"
+assert_eq "extract: dry-run omits peer-id-prefix by default" "0" \
+    "$(printf '%s' "$extract_out" | grep -c -- '--peer-id-prefix=')"
+assert_fail "extract: dry-run does not create the staging directory" \
+    test -e "$EXTRACT_DIR_TEST"
+
+# inpx-fb2 pins its download to the canonical local name.
+touch "$TMPDIR_TEST/flibusta-inpx-fb2-2026-08-01.torrent"
+extract_fb2_out="$(env "${EXTRACT_ENV[@]}" \
+    bash "$PROJECT_ROOT/bin/booktracker-extract.sh" -n "$TMPDIR_TEST/flibusta-inpx-fb2-2026-08-01.torrent" 2>&1)"
+assert_eq "extract: dry-run pins inpx-fb2 to the canonical name" "1" \
+    "$(printf '%s' "$extract_fb2_out" | grep -c -- "--index-out=1=$FB2_INPX_NAME")"
+assert_eq "extract: dry-run records the canonical inpx-fb2 name" "1" \
+    "$(printf '%s' "$extract_fb2_out" | grep -c "files=$FB2_INPX_NAME")"
 
 # Full run: download directly into staging -> record, all via the mock.
 rm -f "$TMPDIR_TEST/staged-cli.tsv"
-touch "$TMPDIR_TEST/flibusta-inpx-fb2-2026-08-01.torrent"
-stage_out2="$(env "${STAGE_ENV[@]}" \
-    bash "$PROJECT_ROOT/bin/booktracker-stage.sh" "$TMPDIR_TEST/flibusta-inpx-fb2-2026-08-01.torrent" 2>&1)"
-stage_rc2=$?
-assert_eq "stage: full run exits 0" "0" "$stage_rc2"
-assert_ok "stage: .inpx downloaded directly into STAGING/inpx" \
-    test -f "$STAGE_DIR_TEST/inpx/lib.inpx"
-assert_eq "stage: staged file has the mock content" "inpx-data" \
-    "$(cat "$STAGE_DIR_TEST/inpx/lib.inpx")"
-assert_fail "stage: no intermediate work/archive directory is created" \
-    test -e "$TMPDIR_TEST/stage-archive"
-assert_ok "stage: torrent recorded in staged state" \
-    grep -q "flibusta-inpx-fb2-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
+touch "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent"
+extract_out2="$(env "${EXTRACT_ENV[@]}" \
+    bash "$PROJECT_ROOT/bin/booktracker-extract.sh" "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent" 2>&1)"
+extract_rc2=$?
+assert_eq "extract: full run exits 0" "0" "$extract_rc2"
+assert_ok "extract: .inpx downloaded directly into STAGING/inpx" \
+    test -f "$EXTRACT_DIR_TEST/inpx/lib.inpx"
+assert_eq "extract: extracted file has the mock content" "inpx-data" \
+    "$(cat "$EXTRACT_DIR_TEST/inpx/lib.inpx")"
+assert_ok "extract: torrent recorded in staged state" \
+    grep -q "flibusta-inpx-all-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
+assert_eq "extract: records the date stamp (not the full filename)" \
+    "2026-08-01" \
+    "$(tail -1 "$TMPDIR_TEST/staged-cli.tsv" | cut -f4)"
 
 # Dump: .gz downloads into FlibustaSQL/ and decompresses into the sibling
 # mysql_feeds/ folder (keeping the raw .gz).  A stale torrent-named folder left by
 # an older nested download is removed before download.
 rm -f "$TMPDIR_TEST/staged-cli.tsv"
-rm -rf "$STAGE_DIR_TEST/FlibustaSQL"
-mkdir -p "$STAGE_DIR_TEST/FlibustaSQL/FlibustaSQL"
-printf 'stale' > "$STAGE_DIR_TEST/FlibustaSQL/FlibustaSQL/stale.bin"
+rm -rf "$EXTRACT_DIR_TEST/FlibustaSQL"
+mkdir -p "$EXTRACT_DIR_TEST/FlibustaSQL/FlibustaSQL"
+printf 'stale' > "$EXTRACT_DIR_TEST/FlibustaSQL/FlibustaSQL/stale.bin"
 touch "$TMPDIR_TEST/flibusta-dump-2026-08-01.torrent"
-stage_out4="$(env "${STAGE_ENV[@]}" \
-    bash "$PROJECT_ROOT/bin/booktracker-stage.sh" "$TMPDIR_TEST/flibusta-dump-2026-08-01.torrent" 2>&1)"
-stage_rc4=$?
-assert_eq "stage: dump run exits 0" "0" "$stage_rc4"
-assert_ok "stage: dump .gz downloaded into FlibustaSQL" \
-    test -f "$STAGE_DIR_TEST/FlibustaSQL/lib.libbook.sql.gz"
-assert_ok "stage: dump .sql decompressed into mysql_feeds" \
-    test -f "$STAGE_DIR_TEST/mysql_feeds/lib.libbook.sql"
-assert_eq "stage: dump .sql has decompressed content" "sql-data" \
-    "$(cat "$STAGE_DIR_TEST/mysql_feeds/lib.libbook.sql")"
-assert_ok "stage: dump torrent recorded" \
+extract_out4="$(env "${EXTRACT_ENV[@]}" \
+    bash "$PROJECT_ROOT/bin/booktracker-extract.sh" "$TMPDIR_TEST/flibusta-dump-2026-08-01.torrent" 2>&1)"
+extract_rc4=$?
+assert_eq "extract: dump run exits 0" "0" "$extract_rc4"
+assert_ok "extract: dump .gz downloaded into FlibustaSQL" \
+    test -f "$EXTRACT_DIR_TEST/FlibustaSQL/lib.libbook.sql.gz"
+assert_ok "extract: dump .sql decompressed into mysql_feeds" \
+    test -f "$EXTRACT_DIR_TEST/mysql_feeds/lib.libbook.sql"
+assert_eq "extract: dump .sql has decompressed content" "sql-data" \
+    "$(cat "$EXTRACT_DIR_TEST/mysql_feeds/lib.libbook.sql")"
+assert_ok "extract: dump torrent recorded" \
     grep -q "flibusta-dump-2026-08-01.torrent" "$TMPDIR_TEST/staged-cli.tsv"
-assert_fail "stage: stale torrent-named dir is removed before download" \
-    test -e "$STAGE_DIR_TEST/FlibustaSQL/FlibustaSQL"
-assert_eq "stage: stale-dir removal is logged" "1" \
-    "$(printf '%s' "$stage_out4" | grep -c 'stale torrent-named')"
+assert_fail "extract: stale torrent-named dir is removed before download" \
+    test -e "$EXTRACT_DIR_TEST/FlibustaSQL/FlibustaSQL"
+assert_eq "extract: stale-dir removal is logged" "1" \
+    "$(printf '%s' "$extract_out4" | grep -c 'stale torrent-named')"
 
 # --resume-only: skip a torrent whose output file already exists (unrecorded).
+rm -f "$TMPDIR_TEST/staged-cli.tsv"
 touch "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent"
-stage_out5="$(env "${STAGE_ENV[@]}" \
-    bash "$PROJECT_ROOT/bin/booktracker-stage.sh" --resume-only "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent" 2>&1)"
-stage_rc5=$?
-assert_eq "stage: --resume-only skips an already-present torrent" "0" "$stage_rc5"
-assert_eq "stage: --resume-only logs the skip" "1" \
-    "$(printf '%s' "$stage_out5" | grep -c 'already present')"
+extract_out5="$(env "${EXTRACT_ENV[@]}" \
+    bash "$PROJECT_ROOT/bin/booktracker-extract.sh" --resume-only "$TMPDIR_TEST/flibusta-inpx-all-2026-08-01.torrent" 2>&1)"
+extract_rc5=$?
+assert_eq "extract: --resume-only skips an already-present torrent" "0" "$extract_rc5"
+assert_eq "extract: --resume-only logs the skip" "1" \
+    "$(printf '%s' "$extract_out5" | grep -c 'already present')"
 
 # --- Summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

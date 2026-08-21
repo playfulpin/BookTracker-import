@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `lib/booktracker-extract_functions.sh`: canonical inpx-fb2 output name
+  (`extract_inpx_fb2_output_name`, `extract_output_basename`) so the FB2-only
+  INPX index lands as `flibusta_fb2_local-YYYY-MM-01_original.inpx`.
+
+### Changed
+
+- `bin/booktracker-extract.sh`: `extract_one` now parses each torrent's
+  download set once into parallel index/name arrays and derives `--select-file`
+  from them, removing the repeated `idx|path`-splitting loops.
+- `tests/run_tests.sh`: rewritten to cover the extract functions (`extract_*`)
+  and the `bin/booktracker-extract.sh` CLI (canonical inpx-fb2 output name,
+  aria2c flags, dump decompress, stale-dir removal, `--resume-only`), replacing
+  the deprecated `stage_*` references.
+
+### Fixed
+
+- `lib/booktracker-import_functions.sh`: removed a stray Markdown code fence at
+  the end of the file that made `bash -n` report an "unexpected EOF" error.
+- `tests/run_tests.sh`: the retention tests called the removed
+  `_retire_superseded` helper; they now call `_archive_superseded`.
+
 ## [0.2.0] - 2026-08-20
 
 ### Added

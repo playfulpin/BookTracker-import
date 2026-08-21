@@ -20,8 +20,8 @@
 #   1  operational failure
 #   2  usage error
 #
-# Version:  0.1.0
-# Updated:  2026-08-20 20:21 CDT
+# Version:  0.1.2
+# Updated:  2026-08-21 12:00 CDT
 # Requires: bash >= 4, aria2c, gzip, GNU coreutils
 #
 # Examples:
@@ -100,10 +100,11 @@ usage_error() {
 # ---------------------------------------------------------------------------
 extract_one() {
     local torrent_file="$1" name type dest dest_dir sql_dir select files_list
-    local torrent_name stale_dir
-    local entry idx path base dst record_dest files_csv="" n=0 total_size=0
-    local -a download_files=()
+    local torrent_name stale_dir record_dest files_csv="" n=0 total_size=0
+    local idx path base dst
+    local i ctrl has_control all_present
     local -a aria_args=()
+    local -a dl_idxs=() dl_names=()
 
     name="$(basename "$torrent_file")"
     type="$(extract_type_from_name "$name")" || {
@@ -135,36 +136,41 @@ extract_one() {
     files_list="${files_list//$'\r'/}"
 
     torrent_name="$(extract_torrent_name <<< "$files_list")"
+
+    # Parse the download set once into parallel arrays: aria2c's 1-based file
+    # index and the on-disk name each file is pinned to (inpx-fb2 uses a
+    # canonical local name; every other type keeps its torrent basename).
     while IFS='|' read -r idx path; do
-        download_files+=("$idx|$path")
+        dl_idxs+=("$idx")
+        dl_names+=("$(extract_output_basename "$type" "$path")")
     done < <(extract_download_files "$type" <<< "$files_list")
 
-    if (( ${#download_files[@]} == 0 )); then
+    n="${#dl_names[@]}"
+    if (( n == 0 )); then
         log_warn "no files to download in $name; skipping"
         return 1
     fi
 
     total_size="$(extract_total_size "$type" <<< "$files_list")"
 
-    for entry in "${download_files[@]}"; do
-        path="${entry#*|}"
-        base="$(basename "$path")"
+    # Recorded names: a dump's .gz is recorded as its decompressed .sql (the
+    # record points at the mysql_feeds output), so strip the .gz suffix there.
+    for base in "${dl_names[@]}"; do
         [[ "$type" == dump ]] && base="${base%.gz}"
         files_csv="${files_csv:+$files_csv,}$base"
-        n=$((n + 1))
     done
 
     record_dest="$dest"
     [[ "$type" == dump ]] && record_dest="$(extract_sql_destination)"
 
     if (( RESUME_ONLY )); then
-        local ctrl has_control=0 all_present=1
+        has_control=0
+        all_present=1
         for ctrl in "$dest_dir"/*.aria2; do
             [[ -e "$ctrl" ]] && { has_control=1; break; }
         done
-        for entry in "${download_files[@]}"; do
-            path="${entry#*|}"
-            [[ -s "$dest_dir/$(basename "$path")" ]] || { all_present=0; break; }
+        for base in "${dl_names[@]}"; do
+            [[ -s "$dest_dir/$base" ]] || { all_present=0; break; }
         done
         if (( all_present )) && (( ! has_control )); then
             log_info "already present: $name (--resume-only, skipping)"
@@ -196,12 +202,10 @@ extract_one() {
 
     case "$type" in
         dump|inpx-fb2|inpx-all)
-            select="$(extract_select_indexes "$type" <<< "$files_list")"
+            select="$(IFS=,; printf '%s' "${dl_idxs[*]}")"
             aria_args+=(--select-file="$select" --bt-remove-unselected-file=true)
-            for entry in "${download_files[@]}"; do
-                idx="${entry%%|*}"
-                path="${entry#*|}"
-                aria_args+=(--index-out="$idx=$(basename "$path")")
+            for (( i = 0; i < n; i++ )); do
+                aria_args+=(--index-out="${dl_idxs[$i]}=${dl_names[$i]}")
             done
             ;;
     esac
@@ -243,11 +247,9 @@ extract_one() {
             log_error "cannot create decompress dir: $sql_dir"
             return 1
         }
-        for entry in "${download_files[@]}"; do
-            path="${entry#*|}"
-            base="$(basename "$path")"
-            src="$dest_dir/$base"
-            dst="$sql_dir/${base%.gz}"
+        for (( i = 0; i < n; i++ )); do
+            src="$dest_dir/${dl_names[$i]}"
+            dst="$sql_dir/${dl_names[$i]%.gz}"
             if gzip -dc "$src" > "$dst"; then
                 log_info "decompressed: $dst"
             else

@@ -21,8 +21,8 @@
 #
 # Based on: Examples/*-torrent-extractor.sh, torrent-staging-spec.md
 #
-# Version:  0.1.0
-# Updated:  2026-08-20 20:21 CDT
+# Version:  0.1.1
+# Updated:  2026-08-20 21:18 CDT
 # Requires: bash >= 4
 # Shell style: quote expansions; prefer local; return not exit; shellcheck-friendly.
 # =============================================================================
@@ -82,6 +82,28 @@ extract_destination() {
 # Print subfolder for decompressed dump .sql (mysql_feeds).
 extract_sql_destination() {
     printf '%s\n' "$MYSQL_FEEDS_SUBDIR"
+}
+
+
+# extract_inpx_fb2_output_name
+# Canonical local name for the FB2-only INPX index:
+#   flibusta_fb2_local-YYYY-MM-01_original.inpx
+# YYYY/MM = current calendar year/month; day is always 01.
+extract_inpx_fb2_output_name() {
+    local ym
+    ym="$(date '+%Y-%m')" || ym="$(date -u '+%Y-%m')"
+    printf 'flibusta_fb2_local-%s-01_original.inpx\n' "$ym"
+}
+
+# extract_output_basename <type> <torrent_path>
+# Final on-disk basename for a downloaded file.
+# inpx-fb2 uses a fixed local naming scheme; all other types keep the torrent name.
+extract_output_basename() {
+    local type="$1" path="$2"
+    case "$type" in
+        inpx-fb2) extract_inpx_fb2_output_name ;;
+        *)        printf '%s\n' "$(basename "$path")" ;;
+    esac
 }
 
 # extract_torrent_name

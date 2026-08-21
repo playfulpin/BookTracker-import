@@ -6,7 +6,7 @@
 *.env
 secrets/
 credentials.txt
-commit_msg_*
+commit_msg/
 *.pem
 *.key
 
@@ -53,3 +53,6 @@ temp/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Editor session leftovers
+BookTracker_session.xml

@@ -672,4 +672,3 @@ history() {
         return 0
     fi
 }
-```
