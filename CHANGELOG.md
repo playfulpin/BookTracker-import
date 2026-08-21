@@ -22,9 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `bin/booktracker-extract.sh` CLI (canonical inpx-fb2 output name,
   aria2c flags, dump decompress, stale-dir removal, `--resume-only`), replacing
   the deprecated `stage_*` references.
-- Script version headers bumped (Updated 2026-08-21 17:18 CDT):
-  `bin/booktracker-extract.sh` 0.1.3, `lib/booktracker-extract_functions.sh`
-  0.1.2, `lib/booktracker-import_functions.sh` 0.1.4.
+- Script version headers: `bin/booktracker-extract.sh` 0.1.3,
+  `lib/booktracker-extract_functions.sh` 0.1.2,
+  `lib/booktracker-import_functions.sh` 0.1.4, and `tests/run_tests.sh` 0.1.0
+  (initial header; Updated 2026-08-21).
 
 ### Fixed
 

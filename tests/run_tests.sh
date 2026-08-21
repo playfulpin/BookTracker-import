@@ -5,6 +5,9 @@
 # Exercises the pure (network-free) functions of booktracker-import and
 # booktracker-extract, plus the CLI argument parsing of both scripts. Run with:
 #     bash tests/run_tests.sh
+#
+# Version:  0.1.0
+# Updated:  2026-08-21 17:23 CDT
 # =============================================================================
 
 set -u
