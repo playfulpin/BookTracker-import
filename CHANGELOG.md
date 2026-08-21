@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-20
+
+### Added
+
+- `bin/booktracker-extract.sh` and `lib/booktracker-extract_functions.sh` —
+  download torrent payloads with aria2c (selective allowlists, destinations,
+  dump decompress to `mysql_feeds/`, state in `data/staged.tsv`).
+  Built from Examples prototypes + torrent-staging-spec behaviour; styled like
+  the import CLI (`usage_error`, exit codes, logging).
+- `config/config.sh`: `STAGED_STATE_FILE`, `ARIA2C_BT_MAX_PEERS`,
+  `ARIA2C_BT_MAX_OPEN_FILES`, `ARIA2C_PEER_ID_PREFIX`.
+
+### Changed
+
+- Preferred payload tool is **extract** (not stage).
+- README documents extract usage and the `deprecated/` folder.
+- `HTTP_USER_AGENT` default → `booktracker-import/0.1.3`.
+
+### Deprecated
+
+- `booktracker-stage.sh` and `booktracker-stage_functions.sh` moved under
+  `deprecated/` for reference only. Prefer `booktracker-extract` for new work.
+  State file `data/staged.tsv` remains compatible with both.
+
 ## [0.1.3] - 2026-08-20
 
 ### Changed
@@ -153,7 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verified live on 2026-08-14: a full `all -f` run resolved and downloaded all
   five release types successfully.
 
-[Unreleased]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/playfulpin/BookTracker-import/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/playfulpin/BookTracker-import/compare/v0.1.0...v0.1.1

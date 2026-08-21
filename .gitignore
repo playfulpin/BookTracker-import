@@ -14,6 +14,7 @@ commit_msg_*
 # Runtime Data (session cookies, downloaded torrents)
 # ==========================================
 data/*
+Examples/*
 !data/.gitkeep
 
 # ==========================================

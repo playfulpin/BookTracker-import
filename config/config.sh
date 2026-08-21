@@ -8,8 +8,8 @@
 #
 # This file is sourced (it defines variables only; it performs no actions).
 #
-# Version:  0.1.2
-# Updated:  2026-08-20 18:08 CDT
+# Version:  0.1.3
+# Updated:  2026-08-20 20:21 CDT
 # =============================================================================
 
 # --- Project paths ----------------------------------------------------------
@@ -58,7 +58,7 @@ BOOKTRACKER_PASSWORD="${BOOKTRACKER_PASSWORD:-}"
 export BOOKTRACKER_USERNAME BOOKTRACKER_PASSWORD
 
 # --- HTTP -------------------------------------------------------------------
-HTTP_USER_AGENT="${HTTP_USER_AGENT:-booktracker-import/0.1.2 (+https://booktracker.org)}"
+HTTP_USER_AGENT="${HTTP_USER_AGENT:-booktracker-import/0.1.3 (+https://booktracker.org)}"
 CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-15}"
 CURL_MAX_TIME="${CURL_MAX_TIME:-120}"
 export HTTP_USER_AGENT CURL_CONNECT_TIMEOUT CURL_MAX_TIME
@@ -99,6 +99,11 @@ TORRENT_RETENTION_DAYS="${TORRENT_RETENTION_DAYS:-0}"  # prune archive older tha
 STATE_FILE="${STATE_FILE:-$DATA_DIR/downloads.tsv}"    # download state/history log
 export TORRENT_NAME_PREFIX ARCHIVE_DIR ARCHIVE_TORRENTS TORRENT_RETENTION_DAYS STATE_FILE
 
+# State file for payload extraction (booktracker-extract.sh). Same TSV is
+# compatible with the older booktracker-stage.sh naming (staged.tsv).
+STAGED_STATE_FILE="${STAGED_STATE_FILE:-$DATA_DIR/staged.tsv}"
+export STAGED_STATE_FILE
+
 # --- Behavior ---------------------------------------------------------------
 DRY_RUN="${DRY_RUN:-0}"            # 1 = print actions, do not download
 VERIFY_TORRENT="${VERIFY_TORRENT:-1}" # 1 = validate downloaded torrents
@@ -115,6 +120,13 @@ ARIA2C_SUMMARY_INTERVAL="${ARIA2C_SUMMARY_INTERVAL:-30}"    # aria2c progress-su
 # original tracker is down or stale but the torrent is public.  Empty = none.
 ARIA2C_EXTRA_TRACKERS="${ARIA2C_EXTRA_TRACKERS:-udp://tracker.opentrackr.org:1337/announce,udp://open.stealth.si:80/announce,udp://tracker.torrent.eu.org:451/announce,udp://tracker.moeking.me:6969/announce,udp://explodie.org:6969/announce,udp://tracker.birkenfeld.org:6969/announce,udp://open.demonii.com:1337/announce,udp://exodus.desync.com:6969/announce,udp://tracker.openbittorrent.com:6969/announce,http://tracker.opentrackr.org:1337/announce}"
 export ARIA2C_SEED_TIME ARIA2C_MAX_TRIES ARIA2C_SUMMARY_INTERVAL ARIA2C_EXTRA_TRACKERS
+
+# Optional peer tuning (from Examples/*-torrent-extractor.sh).
+ARIA2C_BT_MAX_PEERS="${ARIA2C_BT_MAX_PEERS:-150}"
+ARIA2C_BT_MAX_OPEN_FILES="${ARIA2C_BT_MAX_OPEN_FILES:-200}"
+# Empty = omit --peer-id-prefix (aria2c default).
+ARIA2C_PEER_ID_PREFIX="${ARIA2C_PEER_ID_PREFIX:-}"
+export ARIA2C_BT_MAX_PEERS ARIA2C_BT_MAX_OPEN_FILES ARIA2C_PEER_ID_PREFIX
 
 # Which files to download from the database dump torrent.  Only these core
 # library tables are fetched; the .zip attached archives, the annotations
