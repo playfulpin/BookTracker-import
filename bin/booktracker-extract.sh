@@ -20,8 +20,8 @@
 #   1  operational failure
 #   2  usage error
 #
-# Version:  0.1.2
-# Updated:  2026-08-21 12:00 CDT
+# Version:  0.1.3
+# Updated:  2026-08-21 17:18 CDT
 # Requires: bash >= 4, aria2c, gzip, GNU coreutils
 #
 # Examples:

@@ -21,8 +21,8 @@
 #
 # Based on: Examples/*-torrent-extractor.sh, torrent-staging-spec.md
 #
-# Version:  0.1.1
-# Updated:  2026-08-20 21:18 CDT
+# Version:  0.1.2
+# Updated:  2026-08-21 17:18 CDT
 # Requires: bash >= 4
 # Shell style: quote expansions; prefer local; return not exit; shellcheck-friendly.
 # =============================================================================

@@ -33,8 +33,8 @@
 #   1  operational failure
 #   2  bad input / usage (where applicable)
 #
-# Version:  0.1.3
-# Updated:  2026-08-20 18:46 CDT
+# Version:  0.1.4
+# Updated:  2026-08-21 17:18 CDT
 # Requires: bash >= 4, curl, GNU grep, GNU date, head, sed
 # Shell style: quote expansions; prefer local; return not exit in library;
 #   process substitution over cat|while; shellcheck-friendly.
