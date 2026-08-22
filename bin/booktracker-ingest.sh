@@ -9,7 +9,7 @@
 # Stages:
 #   load      load mysql_feeds/*.sql (+ lib.libfilenameold.sql) into MYSQL_DATABASE
 #   convert   run lib.convert.sql (lib* -> ml*)
-#   base      run createtable.sql + genre.sql (mllbr_main tables + genre list)
+#   base      run createtable.sql (mllbr_main tables)
 #   rating    run Flibusta_Load_mlrating.sql (build mlrating from librate)
 #   check     verify the rebuilt catalog/ratings are populated (read-only)
 #   cleanup   drop leftover working tables (librating + raw lib* tables)
@@ -29,8 +29,8 @@
 #   1  operational failure
 #   2  usage error
 #
-# Version:  0.1.2
-# Updated:  2026-08-21 20:23 CDT
+# Version:  0.1.3
+# Updated:  2026-08-22 11:32 CDT
 # Requires: bash >= 4, mysql/mariadb client
 #
 # Examples:
@@ -81,7 +81,7 @@ stage, runs all six in order.
 Stages:
   load      Load mysql_feeds/*.sql (+ lib.libfilenameold.sql)
   convert   Run lib.convert.sql (lib* -> ml* transform)
-  base      Run createtable.sql + genre.sql (mllbr_main tables + genre list)
+  base      Run createtable.sql (mllbr_main tables)
   rating    Run Flibusta_Load_mlrating.sql (build mlrating from librate)
   check     Verify the rebuilt catalog/ratings are populated (read-only)
   cleanup   Drop leftover working tables (librating + raw lib* tables)
@@ -178,6 +178,14 @@ main() {
     # Back up MultiLib's data dir first (dry-run only reports the copy).
     ingest_backup || { log_error "aborting: backup failed"; return 1; }
 
+    # Ensure MariaDB is running before touching the database.
+    if ! ingest_mariadb_running; then
+        log_info "MariaDB is not running; attempting to start it"
+        ingest_mariadb_start || { log_error "aborting: cannot start MariaDB"; return 1; }
+    else
+        debug "MariaDB is already running"
+    fi
+
     log_info "ingesting ${#stages[@]} stage(s) into $MYSQL_DATABASE"
     for stage in "${stages[@]}"; do
         if "ingest_$stage"; then
@@ -191,6 +199,9 @@ main() {
             fi
         fi
     done
+
+    # Stop MariaDB if we started it; leave it if it was already running.
+    ingest_mariadb_stop
 
     if (( fail > 0 )); then
         log_warn "finished ingesting: $ok ok, $fail failed"

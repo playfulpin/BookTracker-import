@@ -8,8 +8,8 @@
 #
 # This file is sourced (it defines variables only; it performs no actions).
 #
-# Version:  0.1.6
-# Updated:  2026-08-21 20:23 CDT
+# Version:  0.1.7
+# Updated:  2026-08-22 11:32 CDT
 # =============================================================================
 
 # --- Project paths ----------------------------------------------------------
@@ -152,7 +152,7 @@ export MYSQL_CLIENT MYSQL_HOST MYSQL_PORT MYSQL_USER MYSQL_PASSWORD \
 
 # Directory holding the transform/base SQL bundled with this project.  The
 # canonical copies of MultiLib's SQL (lib.convert.sql, lib.libfilenameold.sql,
-# createtable.sql, genre.sql, Flibusta_Load_mlrating.sql) are stored under
+# createtable.sql, Flibusta_Load_mlrating.sql) are stored under
 # sql/ and referenced from here so the ingest stage is self-contained.
 SQL_DIR="${SQL_DIR:-$PROJECT_ROOT/sql}"
 export SQL_DIR
@@ -173,3 +173,13 @@ INGEST_STRICT="${INGEST_STRICT:-1}"
 # data lives on disk in mysql_feeds/*.sql and in the rebuilt ml* tables).
 INGEST_CLEANUP_TABLES="${INGEST_CLEANUP_TABLES:-librating librate libjoinedbooks librecs libtranslator}"
 export INGEST_STATE_FILE INGEST_STRICT INGEST_CLEANUP_TABLES
+
+# --- MariaDB lifecycle (WSL2 <-> Windows portable MariaDB) --------------------
+# The ingest stage can start/stop the portable MariaDB instance running on the
+# Windows host via PowerShell.  When MariaDB is already running the script
+# leaves it untouched; when the script starts it, it stops it on exit.
+MARIA_TASKLIST="${MARIA_TASKLIST:-/mnt/c/Windows/System32/tasklist.exe}"
+MARIA_TASKKILL="${MARIA_TASKKILL:-/mnt/c/Windows/System32/taskkill.exe}"
+MARIA_EXE="${MARIA_EXE:-C:\\mariadb-10.4.7-winx64\\bin\\mysqld.exe}"
+MARIA_BIN_DIR="${MARIA_BIN_DIR:-C:\\mariadb-10.4.7-winx64\\bin}"
+export MARIA_TASKLIST MARIA_TASKKILL MARIA_EXE MARIA_BIN_DIR

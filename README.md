@@ -222,7 +222,7 @@ rebuild its catalog (`lib*` → `ml*`):
 |-------|--------------|
 | `load` | Load `mysql_feeds/*.sql` (+ `lib.libfilenameold.sql`) into `MYSQL_DATABASE` |
 | `convert` | Run `lib.convert.sql` (`lib*` → `ml*`, destructive rebuild) |
-| `base` | Run `createtable.sql` + `genre.sql` (base tables + genre list) |
+| `base` | Run `createtable.sql` (mllbr_main tables) |
 | `rating` | Run `Flibusta_Load_mlrating.sql` (build `mlrating` from `librate`) |
 | `check` | Verify the rebuilt catalog/ratings are populated (read-only) |
 | `cleanup` | Drop leftover working tables (`librating` + raw `lib*` tables) |
@@ -237,10 +237,16 @@ Before any non-dry-run ingest, the MariaDB data directory
 timestamped sibling (e.g. `/mnt/c/MultiLib/data_2026-08-21_192900`) so the
 catalog can be restored if anything goes wrong. `--dry-run` skips the backup.
 
+The ingest script automatically checks whether MariaDB (`mysqld.exe`) is
+running via `tasklist.exe` and, if absent, starts it via an elevated
+PowerShell process. When the script itself launched MariaDB, it stops the
+server (`taskkill.exe`) on exit; when MariaDB was already running, the
+script leaves it untouched.
+
 > **Note:** `convert` drops and rebuilds the `ml*` catalog tables. Run
-> `--dry-run` first, and make sure MariaDB is running (MultiLib's
-> `start_MariaDB.bat`). For a guaranteed-consistent backup, stop MariaDB
-> (`stop__MariaDB.bat`) before a real run.
+> `--dry-run` first. For a guaranteed-consistent backup, stop MariaDB
+> (`stop__MariaDB.bat`) before a real run — a filesystem copy of a running
+> InnoDB data directory can be captured mid-write.
 
 ## Library functions (`booktracker-import`)
 

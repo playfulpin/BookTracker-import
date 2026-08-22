@@ -6,8 +6,8 @@
 # booktracker-extract, plus the CLI argument parsing of both scripts. Run with:
 #     bash tests/run_tests.sh
 #
-# Version:  0.1.3
-# Updated:  2026-08-21 20:23 CDT
+# Version:  0.1.4
+# Updated:  2026-08-22 11:32 CDT
 # =============================================================================
 
 set -u
@@ -787,16 +787,45 @@ printf 'CREATE TABLE `libbook` (`BookId` int);\n' > "$TMPDIR_TEST/ingest-staging
 printf 'CREATE TABLE `libfilenameold` (`BookId` int);\n' > "$TMPDIR_TEST/sql/lib.libfilenameold.sql"
 printf 'DROP TABLE IF EXISTS `mlbook`;\n' > "$TMPDIR_TEST/sql/lib.convert.sql"
 printf 'CREATE TABLE IF NOT EXISTS `mllbr_main`.`mldownload`;\n' > "$TMPDIR_TEST/sql/createtable.sql"
-printf 'CREATE DATABASE IF NOT EXISTS `private`;\n' > "$TMPDIR_TEST/sql/genre.sql"
 printf 'CREATE TABLE `mlrating`; SELECT 1;\n' > "$TMPDIR_TEST/sql/Flibusta_Load_mlrating.sql"
 mkdir -p "$TMPDIR_TEST/cli-multilib/data"
 printf 'ibdata' > "$TMPDIR_TEST/cli-multilib/data/ibdata1"
+
+# Mock tasklist: when MARIA_MOCK_RUNNING=1, prints "mysqld.exe".
+cat > "$MOCK_BIN/tasklist.exe" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${MARIA_MOCK_RUNNING:-0}" == 1 ]]; then
+    printf 'mysqld.exe                   26464 Console                    1    123,456 K\n'
+fi
+exit 0
+EOF
+chmod +x "$MOCK_BIN/tasklist.exe"
+
+# Mock powershell: records the call and succeeds.
+cat > "$MOCK_BIN/powershell.exe" <<'EOF'
+#!/usr/bin/env bash
+printf 'POWERSHELL %s\n' "$*" >> "${MOCK_PS_LOG:-/dev/null}"
+exit 0
+EOF
+chmod +x "$MOCK_BIN/powershell.exe"
+
+# Mock taskkill: records the call.
+cat > "$MOCK_BIN/taskkill.exe" <<'EOF'
+#!/usr/bin/env bash
+printf 'TASKKILL %s\n' "$*" >> "${MOCK_TK_LOG:-/dev/null}"
+exit 0
+EOF
+chmod +x "$MOCK_BIN/taskkill.exe"
 
 INGEST_ENV=(PATH="$MOCK_BIN:$PATH" BOOKTRACKER_NO_ENV=1 \
     MYSQL_DATABASE=flibusta \
     INGEST_STATE_FILE="$TMPDIR_TEST/ingested-cli.tsv" \
     STAGING_DIR="$TMPDIR_TEST/ingest-staging" MYSQL_FEEDS_SUBDIR=feeds \
     SQL_DIR="$TMPDIR_TEST/sql" \
+    MARIA_TASKLIST="$MOCK_BIN/tasklist.exe" \
+    MARIA_TASKKILL="$MOCK_BIN/taskkill.exe" \
+    MARIA_EXE="mock-mysqld.exe" \
+    MARIA_BIN_DIR="mock-dir" \
     MULTILIB_DATA_DIR="$TMPDIR_TEST/cli-multilib/data")
 
 ingest_rc="$(env "${INGEST_ENV[@]}" bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" --help >/dev/null 2>&1; echo $?)"
@@ -811,11 +840,16 @@ assert_eq "ingest: unknown stage exits non-zero" "2" "$ingest_rc"
 # Dry run: prints the mysql command, executes nothing, records nothing.
 rm -f "$TMPDIR_TEST/mysql-run.log" "$TMPDIR_TEST/ingested-cli.tsv"
 ingest_out="$(env "${INGEST_ENV[@]}" MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    MARIA_MOCK_RUNNING=0 \
     bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" -n 2>&1)"
 ingest_rc=$?
 assert_eq "ingest: dry-run exits 0" "0" "$ingest_rc"
-assert_eq "ingest: dry-run prints a mysql command per file" "8" \
+assert_eq "ingest: dry-run prints start attempt when MariaDB not running" "1" \
+    "$(printf '%s' "$ingest_out" | grep -c 'would start MariaDB')"
+assert_eq "ingest: dry-run prints a mysql command per file" "7" \
     "$(printf '%s' "$ingest_out" | grep -c 'would run: mysql')"
+assert_eq "ingest: dry-run prints stop message" "1" \
+    "$(printf '%s' "$ingest_out" | grep -c 'would stop MariaDB')"
 assert_fail "ingest: dry-run does not execute mysql" \
     test -f "$TMPDIR_TEST/mysql-run.log"
 assert_fail "ingest: dry-run does not record state" \
@@ -824,15 +858,23 @@ assert_fail "ingest: dry-run does not record state" \
 assert_fail "ingest: dry-run does not back up MultiLib/data" \
     test -n "$(ls -d "$TMPDIR_TEST/cli-multilib/data_"* 2>/dev/null)"
 
-# Full run: load (2) + convert (1) + base (2) + rating (1) + check (1) +
-# cleanup (1) = 8 mysql invocations, 6 stage records.
-rm -f "$TMPDIR_TEST/ingested-cli.tsv" "$TMPDIR_TEST/mysql-run.log"
+# Full run: load (2) + convert (1) + base (1) + rating (1) + check (1) +
+# cleanup (1) = 7 mysql invocations, 6 stage records.
+rm -f "$TMPDIR_TEST/ingested-cli.tsv" "$TMPDIR_TEST/mysql-run.log" \
+    "$TMPDIR_TEST/mock-ps.log" "$TMPDIR_TEST/mock-tk.log"
 env "${INGEST_ENV[@]}" MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    MOCK_PS_LOG="$TMPDIR_TEST/mock-ps.log" \
+    MOCK_TK_LOG="$TMPDIR_TEST/mock-tk.log" \
+    MARIA_MOCK_RUNNING=0 \
     bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" >/dev/null 2>&1
 ingest_rc=$?
 assert_eq "ingest: full run exits 0" "0" "$ingest_rc"
-assert_eq "ingest: full run invokes mysql for each file" "8" \
+assert_eq "ingest: starts MariaDB when it is not running" "1" \
+    "$(grep -c 'POWERSHELL' "$TMPDIR_TEST/mock-ps.log" 2>/dev/null)"
+assert_eq "ingest: full run invokes mysql for each file" "7" \
     "$(grep -c 'MYSQL' "$TMPDIR_TEST/mysql-run.log")"
+assert_eq "ingest: stops MariaDB when script started it" "1" \
+    "$(grep -c 'TASKKILL' "$TMPDIR_TEST/mock-tk.log" 2>/dev/null)"
 assert_ok "ingest: records all six stages" \
     awk -F '\t' 'NR>1{a[$2]=1} END{exit !(a["load"]&&a["convert"]&&a["base"]&&a["rating"]&&a["check"]&&a["cleanup"])}' "$TMPDIR_TEST/ingested-cli.tsv"
 assert_eq "ingest: cleanup drops the leftover tables" "5" \
@@ -844,19 +886,28 @@ assert_ok "ingest: full run backs up MultiLib/data first" \
 # Re-run without --force skips every done stage.
 before="$(grep -c 'MYSQL' "$TMPDIR_TEST/mysql-run.log")"
 env "${INGEST_ENV[@]}" MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    _BOOKTRACKER_STARTED_MARIADB=0 MARIA_MOCK_RUNNING=1 \
     bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" >/dev/null 2>&1
 after="$(grep -c 'MYSQL' "$TMPDIR_TEST/mysql-run.log")"
 assert_eq "ingest: re-run without --force skips done stages" "$before" "$after"
+rm -f "$TMPDIR_TEST/mock-tk.log"
+# Full run started MariaDB and wrote to mock-tk.log; this re-run (MariaDB
+# already running) must NOT call taskkill, so the log should be empty.
+assert_eq "ingest: does not stop MariaDB it did not start" "0" \
+    "$(grep -c 'TASKKILL' "$TMPDIR_TEST/mock-tk.log" 2>/dev/null || echo 0)"
 
 # --force re-runs every stage.
+rm -f "$TMPDIR_TEST/ingested-cli.tsv" "$TMPDIR_TEST/mysql-run.log"
 env "${INGEST_ENV[@]}" MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    _BOOKTRACKER_STARTED_MARIADB=0 MARIA_MOCK_RUNNING=1 \
     bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" --force >/dev/null 2>&1
-assert_eq "ingest: --force re-runs all stages" "$((before + 8))" \
+assert_eq "ingest: --force re-runs all stages" "7" \
     "$(grep -c 'MYSQL' "$TMPDIR_TEST/mysql-run.log")"
 
 # A failing mysql aborts in strict mode.
 rm -f "$TMPDIR_TEST/ingested-cli.tsv"
 env "${INGEST_ENV[@]}" MOCK_MYSQL_RC=1 MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    MARIA_MOCK_RUNNING=1 \
     bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" load >/dev/null 2>&1
 ingest_rc=$?
 assert_eq "ingest: failed load exits non-zero (strict)" "1" "$ingest_rc"
@@ -864,8 +915,34 @@ assert_eq "ingest: failed load exits non-zero (strict)" "1" "$ingest_rc"
 # check fails when the rebuilt catalog is empty.
 rm -f "$TMPDIR_TEST/ingested-cli.tsv"
 ingest_rc="$(env "${INGEST_ENV[@]}" MOCK_MYSQL_CHECK_OUT="0|0" \
+    MARIA_MOCK_RUNNING=1 \
     bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" check >/dev/null 2>&1; echo $?)"
 assert_eq "ingest: check fails on an empty catalog" "1" "$ingest_rc"
+
+# MariaDB lifecycle unit tests.
+MARIA_TASKLIST="$MOCK_BIN/tasklist.exe"
+
+export MARIA_MOCK_RUNNING=1
+assert_ok "ingest_mariadb_running succeeds when mysqld.exe is listed" \
+    ingest_mariadb_running
+
+MARIA_MOCK_RUNNING=0
+assert_fail "ingest_mariadb_running fails when mysqld.exe absent" \
+    ingest_mariadb_running
+
+# ingest_mariadb_start (dry run): check it prints the right message.
+DRY_RUN=1
+ingest_out="$(MARIA_EXE='C:\\test\\mysqld.exe' MARIA_BIN_DIR='C:\\test' \
+    ingest_mariadb_start 2>&1)"
+DRY_RUN=0
+assert_eq "ingest_mariadb_start (dry-run) prints the right message" \
+    "1" "$(printf '%s' "$ingest_out" | grep -c 'would start MariaDB')"
+
+# ingest_mariadb_stop is a no-op when the guard is unset.
+unset _BOOKTRACKER_STARTED_MARIADB
+ingest_out="$(ingest_mariadb_stop 2>&1)"
+assert_eq "ingest_mariadb_stop is no-op without guard" "1" \
+    "$(printf '%s' "$ingest_out" | grep -c 'already running')"
 
 # --- Summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

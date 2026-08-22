@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bin/booktracker-ingest.sh` + `lib/booktracker-ingest_functions.sh`: MariaDB
+  lifecycle management — the script now checks whether the portable Windows
+  MariaDB (`mysqld.exe`) is running via `tasklist.exe`, starts it via an
+  elevated PowerShell `Start-Process -Verb RunAs` when absent, and stops it
+  via `taskkill.exe` on exit when the script itself launched the server. When
+  MariaDB is already running the script leaves it untouched. Configurable
+  through `MARIA_TASKLIST`, `MARIA_TASKKILL`, `MARIA_EXE`, and
+  `MARIA_BIN_DIR`.
+
+### Removed
+
+- `sql/genre.sql`: removed from the bundled SQL directory (the base stage now
+  only runs `createtable.sql`).
+- Root-level `booktracker-import.sh`, `torrent-staging-spec.md`, and
+  `stage.log`: stale/deprecated files cleaned from the repository root.
+
+## [0.2.1] - 2026-08-22
+
+### Added
+
 - `lib/booktracker-extract_functions.sh`: canonical inpx-fb2 output name
   (`extract_inpx_fb2_output_name`, `extract_output_basename`) so the FB2-only
   INPX index lands as `flibusta_fb2_local-YYYY-MM-01_original.inpx`.

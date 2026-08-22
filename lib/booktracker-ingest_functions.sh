@@ -29,8 +29,8 @@
 # (strips a leading UTF-8 BOM and CRLF line endings) before it reaches the
 # client.
 #
-# Version:  0.1.2
-# Updated:  2026-08-21 20:23 CDT
+# Version:  0.1.3
+# Updated:  2026-08-22 11:32 CDT
 # Requires: bash >= 4, mysql/mariadb client
 # Shell style: quote expansions; prefer local; return not exit; shellcheck-friendly.
 # =============================================================================
@@ -251,6 +251,87 @@ ingest_backup() {
 }
 
 # =============================================================================
+# MariaDB lifecycle (WSL2 -> Windows portable MariaDB)
+# =============================================================================
+
+# ingest_mariadb_running
+# Return 0 when mysqld.exe is visible via the Windows tasklist interop.
+ingest_mariadb_running() {
+    local tl="${MARIA_TASKLIST:-/mnt/c/Windows/System32/tasklist.exe}"
+    if [[ ! -x "$tl" ]]; then
+        log_warn "tasklist not available: $tl"
+        return 1
+    fi
+    if "$tl" | grep -qi 'mysqld\.exe'; then
+        return 0
+    fi
+    return 1
+}
+
+# ingest_mariadb_start
+# Start the portable MariaDB via an elevated PowerShell process.  Sets the
+# guard variable _BOOKTRACKER_STARTED_MARIADB so ingest_mariadb_stop knows
+# it was this script that launched the server.
+ingest_mariadb_start() {
+    local exe="${MARIA_EXE:-C:\\mariadb-10.4.7-winx64\\bin\\mysqld.exe}"
+    local dir="${MARIA_BIN_DIR:-C:\\mariadb-10.4.7-winx64\\bin}"
+
+    if (( DRY_RUN )); then
+        log_info "[dry-run] would start MariaDB: $exe --console"
+        export _BOOKTRACKER_STARTED_MARIADB=1
+        return 0
+    fi
+
+    log_info "starting MariaDB (expect an elevated PowerShell window)"
+    if powershell.exe -NoProfile -Command \
+        "Start-Process '$exe' -ArgumentList '--console' -WorkingDirectory '$dir' -Verb RunAs"; then
+        export _BOOKTRACKER_STARTED_MARIADB=1
+        log_info "MariaDB start command issued; waiting for listener..."
+        # Give mysqld a few seconds to bind port 3306.
+        local waited=0
+        while (( waited < 15 )); do
+            sleep 1
+            if ingest_mariadb_running; then
+                log_info "MariaDB ready"
+                return 0
+            fi
+            waited=$((waited + 1))
+        done
+        log_warn "MariaDB may still be starting (timed out after ${waited}s)"
+        return 0
+    fi
+    log_error "failed to start MariaDB"
+    return 1
+}
+
+# ingest_mariadb_stop
+# Stop MariaDB via taskkill if this script launched it.  Safe to call even
+# when the server was already running (it's a no-op without the guard).
+ingest_mariadb_stop() {
+    if [[ "${_BOOKTRACKER_STARTED_MARIADB:-0}" != 1 ]]; then
+        log_info "MariaDB was already running; not stopping"
+        return 0
+    fi
+    local tk="${MARIA_TASKKILL:-/mnt/c/Windows/System32/taskkill.exe}"
+    if (( DRY_RUN )); then
+        log_info "[dry-run] would stop MariaDB"
+        return 0
+    fi
+    if [[ ! -x "$tk" ]]; then
+        log_warn "taskkill not available: $tk"
+        return 1
+    fi
+    log_info "stopping MariaDB (this script started it)"
+    if "$tk" /F /IM mysqld.exe 2>/dev/null; then
+        log_info "MariaDB stopped"
+    else
+        log_warn "taskkill may not have stopped MariaDB (already exited?)"
+    fi
+    unset _BOOKTRACKER_STARTED_MARIADB
+    return 0
+}
+
+# =============================================================================
 # Stages
 # =============================================================================
 
@@ -307,10 +388,9 @@ ingest_convert() {
 }
 
 # ingest_base
-# Run createtable.sql + genre.sql (from SQL_DIR) to create the base tables and
-# the genre list.
+# Run createtable.sql (from SQL_DIR) to create the base tables.
 ingest_base() {
-    local bfile="$SQL_DIR/createtable.sql" gfile="$SQL_DIR/genre.sql"
+    local bfile="$SQL_DIR/createtable.sql"
     local -a files=("$bfile")
 
     if (( ! FORCE )) && ingest_is_done "base"; then
@@ -321,9 +401,8 @@ ingest_base() {
         log_error "base sql not found: $bfile (set SQL_DIR)"
         return 1
     fi
-    [[ -f "$gfile" ]] && files+=("$gfile")
 
-    log_info "base stage: creating base tables (createtable.sql, genre.sql)"
+    log_info "base stage: creating base tables (createtable.sql)"
     _ingest_run_files "${files[@]}" || return 1
     (( DRY_RUN )) || ingest_record "base" "ok" "${#files[@]} files"
     return 0
