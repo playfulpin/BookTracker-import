@@ -6,8 +6,8 @@
 # booktracker-extract, plus the CLI argument parsing of both scripts. Run with:
 #     bash tests/run_tests.sh
 #
-# Version:  0.1.0
-# Updated:  2026-08-21 17:23 CDT
+# Version:  0.1.3
+# Updated:  2026-08-21 20:23 CDT
 # =============================================================================
 
 set -u
@@ -27,6 +27,7 @@ export DRY_RUN=0
 source "$PROJECT_ROOT/config/config.sh"
 source "$PROJECT_ROOT/lib/booktracker-import_functions.sh"
 source "$PROJECT_ROOT/lib/booktracker-extract_functions.sh"
+source "$PROJECT_ROOT/lib/booktracker-ingest_functions.sh"
 
 # --- Tiny assertion helpers -------------------------------------------------
 PASS=0
@@ -707,6 +708,164 @@ extract_rc5=$?
 assert_eq "extract: --resume-only skips an already-present torrent" "0" "$extract_rc5"
 assert_eq "extract: --resume-only logs the skip" "1" \
     "$(printf '%s' "$extract_out5" | grep -c 'already present')"
+
+# =============================================================================
+# Ingestion (booktracker-ingest_functions.sh + bin/booktracker-ingest.sh)
+# =============================================================================
+mkdir -p "$TMPDIR_TEST/ingest-list"
+touch "$TMPDIR_TEST/ingest-list/lib.libbook.sql" "$TMPDIR_TEST/ingest-list/lib.libavtor.sql" \
+    "$TMPDIR_TEST/ingest-list/readme.txt"
+assert_eq "ingest_list_sql lists .sql files sorted" \
+    "$TMPDIR_TEST/ingest-list/lib.libavtor.sql
+$TMPDIR_TEST/ingest-list/lib.libbook.sql" \
+    "$(ingest_list_sql "$TMPDIR_TEST/ingest-list")"
+assert_fail "ingest_list_sql fails for a missing dir" \
+    ingest_list_sql "$TMPDIR_TEST/no-such-ingest-dir"
+
+printf -- '-- MySQL dump\nCREATE TABLE `libbook` (`BookId` int);\n' > "$TMPDIR_TEST/good.sql"
+printf 'junk\n' > "$TMPDIR_TEST/bad.sql"
+: > "$TMPDIR_TEST/empty.sql"
+assert_ok "ingest_validate_sql accepts a dump" ingest_validate_sql "$TMPDIR_TEST/good.sql"
+assert_fail "ingest_validate_sql rejects junk" ingest_validate_sql "$TMPDIR_TEST/bad.sql"
+assert_fail "ingest_validate_sql rejects an empty file" ingest_validate_sql "$TMPDIR_TEST/empty.sql"
+
+# BOM + CRLF normalization (bundled sql/ files are authored on Windows).
+assert_eq "ingest: _ingest_normalize_sql strips a BOM and CRLF" \
+    $'/* hi */;\nSELECT 1;' \
+    "$(printf '\xEF\xBB\xBF/* hi */;\r\nSELECT 1;\r\n' | _ingest_normalize_sql)"
+
+# Ingest state file.
+INGEST_STATE_FILE="$TMPDIR_TEST/ingested.tsv"
+MYSQL_DATABASE=flibusta
+ingest_record "load" "ok" "2 files"
+assert_eq "ingest_record writes a header row" \
+    "ingested_at" "$(head -1 "$INGEST_STATE_FILE" | cut -f1)"
+assert_ok "ingest_is_done finds a recorded stage" \
+    ingest_is_done "load" "$INGEST_STATE_FILE"
+assert_fail "ingest_is_done misses an unrecorded stage" \
+    ingest_is_done "convert" "$INGEST_STATE_FILE"
+assert_fail "ingest_is_done returns false without a state file" \
+    ingest_is_done "load" "$TMPDIR_TEST/no-such-ingested.tsv"
+
+# Mock mysql: records its argv (password never included) to $MOCK_MYSQL_LOG.
+# When run with -e (a query, used by ingest_check / ingest_cleanup), it emits
+# canned counts so ingest_check can verify a populated catalog.
+cat > "$MOCK_BIN/mysql" <<'EOF'
+#!/usr/bin/env bash
+printf 'MYSQL %s\n' "$*" >> "${MOCK_MYSQL_LOG:-/dev/null}"
+for a in "$@"; do
+    if [[ "$a" == "-e" ]]; then
+        printf '%s\n' "${MOCK_MYSQL_CHECK_OUT:-866243|340117}"
+        break
+    fi
+done
+exit "${MOCK_MYSQL_RC:-0}"
+EOF
+chmod +x "$MOCK_BIN/mysql"
+
+# password must never appear on the mysql command line (MYSQL_PWD only).
+printf 'SELECT 1;\n' > "$TMPDIR_TEST/pw.sql"
+rm -f "$TMPDIR_TEST/mysql-pw.log"
+( MYSQL_PASSWORD="s3cret" MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-pw.log" \
+    PATH="$MOCK_BIN:$PATH" _ingest_run_sql_file "$TMPDIR_TEST/pw.sql" >/dev/null 2>&1 )
+assert_eq "ingest: password never appears on the mysql command line" \
+    "0" "$(grep -c 's3cret' "$TMPDIR_TEST/mysql-pw.log" 2>/dev/null)"
+
+# ingest_backup copies MULTILIB_DATA_DIR to a timestamped sibling.
+mkdir -p "$TMPDIR_TEST/unit-multilib/data"
+printf 'ibdata' > "$TMPDIR_TEST/unit-multilib/data/ibdata1"
+( MULTILIB_DATA_DIR="$TMPDIR_TEST/unit-multilib/data" \
+    INGEST_STATE_FILE="$TMPDIR_TEST/ingested-backup.tsv" \
+    ingest_backup >/dev/null 2>&1 )
+assert_ok "ingest_backup copies the data dir to a timestamped sibling" \
+    test -f "$TMPDIR_TEST/unit-multilib/data_"*/ibdata1
+assert_eq "ingest_backup records the backup in state" \
+    "backup" "$(tail -1 "$TMPDIR_TEST/ingested-backup.tsv" | cut -f2)"
+
+mkdir -p "$TMPDIR_TEST/ingest-staging/feeds" "$TMPDIR_TEST/sql"
+printf 'CREATE TABLE `libbook` (`BookId` int);\n' > "$TMPDIR_TEST/ingest-staging/feeds/lib.libbook.sql"
+printf 'CREATE TABLE `libfilenameold` (`BookId` int);\n' > "$TMPDIR_TEST/sql/lib.libfilenameold.sql"
+printf 'DROP TABLE IF EXISTS `mlbook`;\n' > "$TMPDIR_TEST/sql/lib.convert.sql"
+printf 'CREATE TABLE IF NOT EXISTS `mllbr_main`.`mldownload`;\n' > "$TMPDIR_TEST/sql/createtable.sql"
+printf 'CREATE DATABASE IF NOT EXISTS `private`;\n' > "$TMPDIR_TEST/sql/genre.sql"
+printf 'CREATE TABLE `mlrating`; SELECT 1;\n' > "$TMPDIR_TEST/sql/Flibusta_Load_mlrating.sql"
+mkdir -p "$TMPDIR_TEST/cli-multilib/data"
+printf 'ibdata' > "$TMPDIR_TEST/cli-multilib/data/ibdata1"
+
+INGEST_ENV=(PATH="$MOCK_BIN:$PATH" BOOKTRACKER_NO_ENV=1 \
+    MYSQL_DATABASE=flibusta \
+    INGEST_STATE_FILE="$TMPDIR_TEST/ingested-cli.tsv" \
+    STAGING_DIR="$TMPDIR_TEST/ingest-staging" MYSQL_FEEDS_SUBDIR=feeds \
+    SQL_DIR="$TMPDIR_TEST/sql" \
+    MULTILIB_DATA_DIR="$TMPDIR_TEST/cli-multilib/data")
+
+ingest_rc="$(env "${INGEST_ENV[@]}" bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" --help >/dev/null 2>&1; echo $?)"
+assert_eq "ingest: --help exits 0" "0" "$ingest_rc"
+
+ingest_rc="$(env "${INGEST_ENV[@]}" MYSQL_CLIENT=definitely-not-mysql bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" >/dev/null 2>&1; echo $?)"
+assert_eq "ingest: missing mysql client exits non-zero" "1" "$ingest_rc"
+
+ingest_rc="$(env "${INGEST_ENV[@]}" bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" bogus >/dev/null 2>&1; echo $?)"
+assert_eq "ingest: unknown stage exits non-zero" "2" "$ingest_rc"
+
+# Dry run: prints the mysql command, executes nothing, records nothing.
+rm -f "$TMPDIR_TEST/mysql-run.log" "$TMPDIR_TEST/ingested-cli.tsv"
+ingest_out="$(env "${INGEST_ENV[@]}" MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" -n 2>&1)"
+ingest_rc=$?
+assert_eq "ingest: dry-run exits 0" "0" "$ingest_rc"
+assert_eq "ingest: dry-run prints a mysql command per file" "8" \
+    "$(printf '%s' "$ingest_out" | grep -c 'would run: mysql')"
+assert_fail "ingest: dry-run does not execute mysql" \
+    test -f "$TMPDIR_TEST/mysql-run.log"
+assert_fail "ingest: dry-run does not record state" \
+    test -f "$TMPDIR_TEST/ingested-cli.tsv"
+
+assert_fail "ingest: dry-run does not back up MultiLib/data" \
+    test -n "$(ls -d "$TMPDIR_TEST/cli-multilib/data_"* 2>/dev/null)"
+
+# Full run: load (2) + convert (1) + base (2) + rating (1) + check (1) +
+# cleanup (1) = 8 mysql invocations, 6 stage records.
+rm -f "$TMPDIR_TEST/ingested-cli.tsv" "$TMPDIR_TEST/mysql-run.log"
+env "${INGEST_ENV[@]}" MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" >/dev/null 2>&1
+ingest_rc=$?
+assert_eq "ingest: full run exits 0" "0" "$ingest_rc"
+assert_eq "ingest: full run invokes mysql for each file" "8" \
+    "$(grep -c 'MYSQL' "$TMPDIR_TEST/mysql-run.log")"
+assert_ok "ingest: records all six stages" \
+    awk -F '\t' 'NR>1{a[$2]=1} END{exit !(a["load"]&&a["convert"]&&a["base"]&&a["rating"]&&a["check"]&&a["cleanup"])}' "$TMPDIR_TEST/ingested-cli.tsv"
+assert_eq "ingest: cleanup drops the leftover tables" "5" \
+    "$(grep -o 'DROP TABLE IF EXISTS' "$TMPDIR_TEST/mysql-run.log" | wc -l)"
+
+assert_ok "ingest: full run backs up MultiLib/data first" \
+    test -f "$TMPDIR_TEST/cli-multilib/data_"*/ibdata1
+
+# Re-run without --force skips every done stage.
+before="$(grep -c 'MYSQL' "$TMPDIR_TEST/mysql-run.log")"
+env "${INGEST_ENV[@]}" MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" >/dev/null 2>&1
+after="$(grep -c 'MYSQL' "$TMPDIR_TEST/mysql-run.log")"
+assert_eq "ingest: re-run without --force skips done stages" "$before" "$after"
+
+# --force re-runs every stage.
+env "${INGEST_ENV[@]}" MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" --force >/dev/null 2>&1
+assert_eq "ingest: --force re-runs all stages" "$((before + 8))" \
+    "$(grep -c 'MYSQL' "$TMPDIR_TEST/mysql-run.log")"
+
+# A failing mysql aborts in strict mode.
+rm -f "$TMPDIR_TEST/ingested-cli.tsv"
+env "${INGEST_ENV[@]}" MOCK_MYSQL_RC=1 MOCK_MYSQL_LOG="$TMPDIR_TEST/mysql-run.log" \
+    bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" load >/dev/null 2>&1
+ingest_rc=$?
+assert_eq "ingest: failed load exits non-zero (strict)" "1" "$ingest_rc"
+
+# check fails when the rebuilt catalog is empty.
+rm -f "$TMPDIR_TEST/ingested-cli.tsv"
+ingest_rc="$(env "${INGEST_ENV[@]}" MOCK_MYSQL_CHECK_OUT="0|0" \
+    bash "$PROJECT_ROOT/bin/booktracker-ingest.sh" check >/dev/null 2>&1; echo $?)"
+assert_eq "ingest: check fails on an empty catalog" "1" "$ingest_rc"
 
 # --- Summary ----------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

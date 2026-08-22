@@ -12,6 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lib/booktracker-extract_functions.sh`: canonical inpx-fb2 output name
   (`extract_inpx_fb2_output_name`, `extract_output_basename`) so the FB2-only
   INPX index lands as `flibusta_fb2_local-YYYY-MM-01_original.inpx`.
+- `bin/booktracker-ingest.sh` + `lib/booktracker-ingest_functions.sh`: new
+  `ingest` stage that loads `mysql_feeds/*.sql` into a MySQL/MariaDB instance
+  and runs MultiLib's transform SQL (`lib.convert.sql`, `createtable.sql`) to
+  rebuild the catalog (`lib*` → `ml*`). Supports `load`/`convert`/`base`
+  stages, `--dry-run`, `--force`, and per-stage idempotency via `ingested.tsv`.
+  Connects over TCP to `127.0.0.1` (WSL2 mirrored networking); password is
+  passed via `MYSQL_PWD`, never on the command line.
+- `bin/booktracker-ingest.sh`: before any non-dry-run ingest, backs up
+  `MULTILIB_DATA_DIR` (default `/mnt/c/MultiLib/data`) to a timestamped
+  sibling so the MultiLib catalog can be restored. `--dry-run` skips the
+  backup.
+- `bin/booktracker-ingest.sh` + `lib/booktracker-ingest_functions.sh`: the
+  transform/base/rating SQL now ships under `sql/` (`SQL_DIR`) instead of the
+  external MultiLib plugin dir, and the pipeline gained three final stages —
+  `rating` (runs `Flibusta_Load_mlrating.sql` to build `mlrating` from
+  `librate`), `check` (read-only verification that `mlbook`/`mlrating` are
+  populated), and `cleanup` (drops `INGEST_CLEANUP_TABLES`). Each bundled SQL
+  file is normalized (leading UTF-8 BOM + CRLF stripped) before loading.
 
 ### Changed
 
@@ -26,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib/booktracker-extract_functions.sh` 0.1.2,
   `lib/booktracker-import_functions.sh` 0.1.4, and `tests/run_tests.sh` 0.1.0
   (initial header; Updated 2026-08-21).
+- `config/config.sh` 0.1.6: added `MYSQL_*` connection vars, `SQL_DIR`,
+  `MULTILIB_DATA_DIR`, `INGEST_STATE_FILE`, `INGEST_STRICT`, and
+  `INGEST_CLEANUP_TABLES` for the ingest stage (replacing the earlier
+  `MULTILIB_PLUGINS_DIR`); `tests/run_tests.sh` 0.1.3 (ingest unit + CLI
+  tests, including the data-dir backup and the rating/check/cleanup stages).
 
 ### Fixed
 

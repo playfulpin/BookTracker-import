@@ -8,8 +8,8 @@
 #
 # This file is sourced (it defines variables only; it performs no actions).
 #
-# Version:  0.1.3
-# Updated:  2026-08-20 20:21 CDT
+# Version:  0.1.6
+# Updated:  2026-08-21 20:23 CDT
 # =============================================================================
 
 # --- Project paths ----------------------------------------------------------
@@ -133,3 +133,43 @@ export ARIA2C_BT_MAX_PEERS ARIA2C_BT_MAX_OPEN_FILES ARIA2C_PEER_ID_PREFIX
 # tables, lib.md5.txt.gz, and lib.reviews.sql.gz are skipped.
 DUMP_ALLOWLIST="${DUMP_ALLOWLIST:-lib.libavtor.sql.gz lib.libavtorname.sql.gz lib.libbook.sql.gz lib.libfilename.sql.gz lib.libgenre.sql.gz lib.libgenrelist.sql.gz lib.libjoinedbooks.sql.gz lib.librate.sql.gz lib.librecs.sql.gz lib.libseq.sql.gz lib.libseqname.sql.gz lib.libtranslator.sql.gz}"
 export DUMP_ALLOWLIST
+
+# --- MySQL ingestion --------------------------------------------------------
+# booktracker-ingest.sh loads the decompressed dump .sql files into a local
+# MySQL/MariaDB instance and runs MultiLib's transform SQL to rebuild its
+# catalog (lib* -> ml*).  Defaults target the portable MariaDB bundled with
+# MultiLib, reachable from WSL2 over mirrored-networking loopback (127.0.0.1).
+MYSQL_CLIENT="${MYSQL_CLIENT:-mysql}"          # client binary (mysql | mariadb)
+MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"          # server host (mirrored loopback)
+MYSQL_PORT="${MYSQL_PORT:-3306}"
+MYSQL_USER="${MYSQL_USER:-root}"
+MYSQL_PASSWORD="${MYSQL_PASSWORD:-}"           # empty = no password
+MYSQL_DATABASE="${MYSQL_DATABASE:-flibusta}"   # target DB (MultiLib catalog)
+# Single extra client option (e.g. --default-character-set=utf8).
+MYSQL_EXTRA_ARGS="${MYSQL_EXTRA_ARGS:---default-character-set=utf8}"
+export MYSQL_CLIENT MYSQL_HOST MYSQL_PORT MYSQL_USER MYSQL_PASSWORD \
+       MYSQL_DATABASE MYSQL_EXTRA_ARGS
+
+# Directory holding the transform/base SQL bundled with this project.  The
+# canonical copies of MultiLib's SQL (lib.convert.sql, lib.libfilenameold.sql,
+# createtable.sql, genre.sql, Flibusta_Load_mlrating.sql) are stored under
+# sql/ and referenced from here so the ingest stage is self-contained.
+SQL_DIR="${SQL_DIR:-$PROJECT_ROOT/sql}"
+export SQL_DIR
+
+# MultiLib data directory (MariaDB datadir, C:\MultiLib\data).  Backed up to a
+# timestamped sibling before every non-dry-run ingest (see ingest_backup).
+MULTILIB_DATA_DIR="${MULTILIB_DATA_DIR:-/mnt/c/MultiLib/data}"
+export MULTILIB_DATA_DIR
+
+# State file recording which ingest stages (load/convert/base/rating/check/
+# cleanup) have run.
+INGEST_STATE_FILE="${INGEST_STATE_FILE:-$DATA_DIR/ingested.tsv}"
+# 1 = abort the whole ingest on the first failed stage/file; 0 = continue + report.
+INGEST_STRICT="${INGEST_STRICT:-1}"
+# Leftover working tables dropped by the cleanup stage (space-separated).
+# librating is the intermediate built by Flibusta_Load_mlrating.sql; the lib*
+# tables are raw dump tables not consumed by lib.convert.sql (their canonical
+# data lives on disk in mysql_feeds/*.sql and in the rebuilt ml* tables).
+INGEST_CLEANUP_TABLES="${INGEST_CLEANUP_TABLES:-librating librate libjoinedbooks librecs libtranslator}"
+export INGEST_STATE_FILE INGEST_STRICT INGEST_CLEANUP_TABLES

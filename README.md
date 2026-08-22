@@ -30,12 +30,14 @@ consistent and reproducible way.
 booktracker-import/
 ├── bin/
 │   ├── booktracker-import.sh       # download .torrent metadata
-│   └── booktracker-extract.sh      # download torrent payloads (aria2c)
+│   ├── booktracker-extract.sh      # download torrent payloads (aria2c)
+│   └── booktracker-ingest.sh       # load dumps into MySQL + rebuild catalog
 ├── config/
 │   └── config.sh                   # paths, titles, behaviour defaults
 ├── lib/
 │   ├── booktracker-import_functions.sh
-│   └── booktracker-extract_functions.sh
+│   ├── booktracker-extract_functions.sh
+│   └── booktracker-ingest_functions.sh
 ├── deprecated/                     # retired stage implementation (reference only)
 │   ├── booktracker-stage.sh
 │   └── booktracker-stage_functions.sh
@@ -54,6 +56,8 @@ Executable scripts:
 
 * `booktracker-import.sh` — login and download `.torrent` files
 * `booktracker-extract.sh` — download torrent contents with `aria2c`
+* `booktracker-ingest.sh` — load dump `.sql` files into MySQL/MariaDB and
+  rebuild the MultiLib catalog
 
 ### `config/`
 
@@ -92,6 +96,7 @@ Unix/Linux (also runs under Git Bash on Windows).
 | GNU `date` | `-d` / `-u` |
 | `head`, `cut`, `du` | coreutils |
 | `aria2c`, `gzip` | extract only |
+| `mysql` client | ingest only |
 
 ## Installation
 
@@ -99,7 +104,7 @@ Unix/Linux (also runs under Git Bash on Windows).
 git clone https://github.com/playfulpin/BookTracker-import.git
 cd BookTracker-import
 
-chmod +x bin/booktracker-import.sh bin/booktracker-extract.sh
+chmod +x bin/booktracker-import.sh bin/booktracker-extract.sh bin/booktracker-ingest.sh
 ```
 
 Extract additionally needs `aria2c` (e.g. `sudo apt install aria2`).
@@ -200,6 +205,43 @@ Releases can be tens of GB and take hours. For unattended runs, use `tmux` or
 > reference only. Prefer `booktracker-extract` for all new work. Both can share
 > the same `data/staged.tsv` state file.
 
+### Ingest (load into MySQL / rebuild the catalog)
+
+After the dump `.sql` files are decompressed into `mysql_feeds/`, load them
+into a local MySQL/MariaDB instance and run MultiLib's transform SQL to
+rebuild its catalog (`lib*` → `ml*`):
+
+```bash
+./bin/booktracker-ingest.sh              # load+convert+base+rating+check+cleanup (default)
+./bin/booktracker-ingest.sh load         # only load the raw lib* tables
+./bin/booktracker-ingest.sh --dry-run    # print the mysql commands
+./bin/booktracker-ingest.sh --force      # re-run even if already recorded
+```
+
+| Stage | What it does |
+|-------|--------------|
+| `load` | Load `mysql_feeds/*.sql` (+ `lib.libfilenameold.sql`) into `MYSQL_DATABASE` |
+| `convert` | Run `lib.convert.sql` (`lib*` → `ml*`, destructive rebuild) |
+| `base` | Run `createtable.sql` + `genre.sql` (base tables + genre list) |
+| `rating` | Run `Flibusta_Load_mlrating.sql` (build `mlrating` from `librate`) |
+| `check` | Verify the rebuilt catalog/ratings are populated (read-only) |
+| `cleanup` | Drop leftover working tables (`librating` + raw `lib*` tables) |
+
+The transform/base/rating SQL is bundled under `sql/` (`SQL_DIR`, default
+`<project>/sql`). The bundled files were authored on Windows (CRLF, some with a
+UTF-8 BOM), so each is normalized before it reaches the client. It connects
+over TCP to `127.0.0.1` (WSL2 mirrored networking), never `localhost`.
+
+Before any non-dry-run ingest, the MariaDB data directory
+(`MULTILIB_DATA_DIR`, default `/mnt/c/MultiLib/data`) is copied to a
+timestamped sibling (e.g. `/mnt/c/MultiLib/data_2026-08-21_192900`) so the
+catalog can be restored if anything goes wrong. `--dry-run` skips the backup.
+
+> **Note:** `convert` drops and rebuilds the `ml*` catalog tables. Run
+> `--dry-run` first, and make sure MariaDB is running (MultiLib's
+> `start_MariaDB.bat`). For a guaranteed-consistent backup, stop MariaDB
+> (`stop__MariaDB.bat`) before a real run.
+
 ## Library functions (`booktracker-import`)
 
 | Function | Purpose |
@@ -289,6 +331,15 @@ take precedence.
 | `MYSQL_FEEDS_SUBDIR` | `mysql_feeds` | Subfolder for decompressed `*.sql` |
 | `BOOK_ARCHIVES_SUBDIR` | `book_archives` | Subfolder for monthly zips |
 | `DUMP_ALLOWLIST` | *(12 filenames)* | Dump files to fetch (extract) |
+| `MYSQL_HOST` / `MYSQL_PORT` | `127.0.0.1` / `3306` | MySQL server (ingest) |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | `root` / *(empty)* | MySQL credentials (ingest) |
+| `MYSQL_DATABASE` | `flibusta` | Target database (ingest) |
+| `MYSQL_EXTRA_ARGS` | `--default-character-set=utf8` | Extra client option (ingest) |
+| `SQL_DIR` | `<project>/sql` | Bundled transform/base/rating SQL source |
+| `MULTILIB_DATA_DIR` | `/mnt/c/MultiLib/data` | MariaDB data dir, backed up before ingest |
+| `INGEST_STATE_FILE` | `data/ingested.tsv` | Ingest stage history |
+| `INGEST_STRICT` | `1` | Abort ingest on first failure |
+| `INGEST_CLEANUP_TABLES` | *(5 tables)* | Leftover tables dropped by cleanup |
 | `ARIA2C_*` | see `config.sh` | Extract download behaviour |
 
 ## Logging
